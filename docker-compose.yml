@@ -1,0 +1,19 @@
+services:
+  # フロントエンドサービス
+  frontend:
+    build:
+      context: ./frontend
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules # node_modulesは同期対象から除外
+    ports:
+      - "5173:5173"
+
+  # バックエンドサービス
+  backend:
+    build:
+      context: ./backend
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8080:8080"

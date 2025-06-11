@@ -1,0 +1,23 @@
+# .air.toml - airへの指示書
+
+# 監視する一番上のディレクトリ。今回はbackendディレクトリ自身なので"."でOK。
+root = "."
+# ビルドで出来た実行ファイルなどを置くための一時的なディレクトリ名。
+tmp_dir = "tmp"
+
+[build]
+# ファイル変更時に実行するビルドコマンド。
+# 「go build」でビルドし、「-o ./tmp/main」で結果をtmpディレクトリの中にmainという名前で保存する。
+cmd = "go build -o ./tmp/main ."
+
+# airが実際に実行するプログラムの場所。上記cmdで作成したもの。
+bin = "./tmp/main"
+
+# この拡張子のファイルが変更されたら再起動の対象にする。
+include_ext = ["go", "tpl", "tmpl", "html"]
+# これらのディレクトリ内のファイルは変更されても無視する。
+exclude_dir = ["assets", "tmp", "vendor"]
+
+[log]
+# ログの先頭に時間を表示してくれるので、見やすい。
+time = true

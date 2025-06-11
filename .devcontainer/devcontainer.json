@@ -1,0 +1,7 @@
+{
+    "name": "Coffee Beans Project",
+    "dockerComposeFile": "../docker-compose.yml",
+    "service": "frontend",
+    "workspaceFolder": "/app",
+    "shutdownAction": "stopCompose"
+  }
