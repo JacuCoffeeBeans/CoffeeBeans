@@ -26,7 +26,6 @@ jobs:
                             --arg desc "Project README (auto-updated)" \
                             --arg content "$(cat $FILE_PATH)" \
                             '{description: $desc, files: {"README.md": {content: $content}}}')
-
           # Gist APIを叩いてファイルを更新
           curl -s -L -X PATCH \
             -H "Accept: application/vnd.github+json" \
