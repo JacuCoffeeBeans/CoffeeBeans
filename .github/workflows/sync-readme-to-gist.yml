@@ -2,6 +2,7 @@
 name: Sync README.md to Gist
 
 on:
+  workflow_dispatch: # 手動で実行するための設定
   push:
     branches:
       - main  # README.mdがあるメインのブランチ名に合わせて変更してください (main, masterなど)
