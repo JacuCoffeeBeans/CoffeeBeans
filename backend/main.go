@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"github.com/rs/cors"
 )
 
 // コーヒー豆のデータ構造を定義する
@@ -36,14 +37,25 @@ func getBeansHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	// ルートURLへのアクセスは、サーバーが動いていることを確認するために残しておく
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+
+	mux := http.NewServeMux() // httpルーターをmuxとして定義
+
+	// ルートURLへのアクセス
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "Backend server is running!")
 	})
 
-	// 新しいAPIエンドポイントを登録
-	http.HandleFunc("/api/beans", getBeansHandler)
+	// APIエンドポイントを登録
+	mux.HandleFunc("/api/beans", getBeansHandler)
+
+	// ▼▼▼ CORS設定を追加 ▼▼▼
+	handler := cors.New(cors.Options{
+		AllowedOrigins: []string{"http://localhost:5173"}, // フロントエンドのURLを許可
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type"},
+	}).Handler(mux)
+	// ▲▲▲ ここまで ▲▲▲
 
 	fmt.Println("Backend server is running on http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	log.Fatal(http.ListenAndServe(":8080", handler))
 }
