@@ -4,8 +4,9 @@ services:
     build:
       context: ./frontend
     volumes:
-      - ./frontend:/app
-      - /app/node_modules # node_modulesは同期対象から除外
+      - .:/workspaces/coffeebeans:cached
+      - /workspaces/coffeebeans/frontend/node_modules # <--- node_modulesのパスを更新
+
     ports:
       - "5173:5173"
 
