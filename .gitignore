@@ -31,7 +31,7 @@ lerna-debug.log*
 # Dependencies
 # ------------------------------------------------
 # frontend, backendなど場所を問わずnode_modulesを無視
-/node_modules
+node_modules
 # pnpm lock file
 /pnpm-lock.yaml
 
