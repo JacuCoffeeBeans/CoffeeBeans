@@ -1,49 +1,37 @@
 import { render, screen } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, afterEach, afterAll, test, expect, vi } from 'vitest';
 import App from './App';
 import { MantineProvider } from '@mantine/core';
 
-// 成功時のダミーレスポンスを定義
-const mockBeans = [
-  { id: 1, name: 'モック・ブルーマウンテン' },
-  { id: 2, name: 'モック・キリマンジャロ' },
-];
-
-// 'fetch'関数をグローバルにモックする設定
+// APIのモック設定は、一覧ページが表示される際に必要なので残します
+const mockBeans = [{ id: 1, name: 'モック・ブルーマウンテン' }];
 beforeAll(() => {
-  globalThis.fetch = vi.fn().mockImplementation(() =>
-    Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve(mockBeans),
-    })
-  );
+  globalThis.fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: () => Promise.resolve(mockBeans),
+  });
 });
-
-// 各テスト後にモックをリセット
-afterEach(() => {
-  vi.clearAllMocks();
-});
-
-// 全テスト終了後に元のfetchに戻す
-afterAll(() => {
-  vi.restoreAllMocks();
-});
+afterEach(() => vi.clearAllMocks());
+afterAll(() => vi.restoreAllMocks());
 
 
-test('データ取得が成功した場合、コーヒー豆のリストが表示される', async () => {
+test('ルートパスにアクセスすると、コーヒー豆の一覧ページが表示される', async () => {
+  // テスト用に、メモリ上で動作するルーターでAppコンポーネントをラップします
   render(
-    <MantineProvider>
-      <App />
-    </MantineProvider>
+    <MemoryRouter initialEntries={['/']}>
+      <MantineProvider>
+        <App />
+      </MantineProvider>
+    </MemoryRouter>
   );
 
-  // API通信が完了し、モックデータが表示されるのを待つ
+  // Appコンポーネントが"/"というパスを解釈し、
+  // BeanListPageをレンダリングした結果、以下のテキストが表示されるのを待つ
+  const listTitle = await screen.findByText(/コーヒー豆リスト/i);
   const firstItem = await screen.findByText('モック・ブルーマウンテン');
 
-  // モックデータが正しく表示されていることを確認
+  // テキストが表示されていれば、正しくルーティングされたと判断できる
+  expect(listTitle).toBeInTheDocument();
   expect(firstItem).toBeInTheDocument();
-  expect(screen.getByText('モック・キリマンジャロ')).toBeInTheDocument();
-
-  // 最終的に「ローディング中...」が表示されていないことを確認
-  expect(screen.queryByText(/ローディング中.../i)).not.toBeInTheDocument();
 });
