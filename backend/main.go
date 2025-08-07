@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os" // .envファイルを読み込むために追加
+	"os"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/rs/cors"
 )
 
@@ -19,6 +20,12 @@ type Api struct {
 }
 
 func main() {
+
+	// アプリケーション起動時に.envファイルを読み込む
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found, relying on environment variables")
+	}
+
 	// .envからDB接続文字列を取得
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
