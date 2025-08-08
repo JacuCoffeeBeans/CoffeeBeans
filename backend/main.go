@@ -55,7 +55,8 @@ func main() {
 	// ルーティング設定を、apiのメソッドを呼び出すように変更
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", api.healthCheckHandler)
-	mux.HandleFunc("/api/beans", api.getBeansHandler)
+	mux.HandleFunc("GET /api/beans", api.getBeansHandler)
+	mux.HandleFunc("POST /api/beans", api.createBeanHandler)
 	mux.HandleFunc("/api/beans/{id}", api.getBeanHandler)
 
 	// CORS設定

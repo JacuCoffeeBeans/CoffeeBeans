@@ -2,10 +2,20 @@ package main
 
 import (
 	"context"
+	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// Querierインターフェースは、pgxpool.Poolとpgx.Txの両方が満たすメソッドを定義します。
+// これにより、通常の操作とトランザクション内の操作を同じコードで扱えるようになります。
+type Querier interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+}
 
 // Bean 構造体
 type Bean struct {
@@ -19,13 +29,13 @@ type Bean struct {
 	RoastProfile string    `json:"roast_profile"`
 }
 
-// Store はデータベース接続プールを保持します
+// Store はデータベース接続またはトランザクションを保持します
 type Store struct {
-	db *pgxpool.Pool
+	db Querier
 }
 
 // NewStore は新しいStoreインスタンスを作成します
-func NewStore(db *pgxpool.Pool) *Store {
+func NewStore(db Querier) *Store {
 	return &Store{db: db}
 }
 
@@ -59,4 +69,30 @@ func (s *Store) GetBeanByID(ctx context.Context, id int) (*Bean, error) {
 		return nil, err
 	}
 	return &b, nil
+}
+
+// CreateBean は新しいコーヒー豆のデータをDBに挿入します
+func (s *Store) CreateBean(ctx context.Context, bean *Bean) (*Bean, error) {
+	var newBean Bean
+	// SQLクエリ: 新しいデータを挿入し、その結果（IDなど）を返す
+	query := `INSERT INTO beans (name, origin, price, process, roast_profile, updated_at)
+			   VALUES ($1, $2, $3, $4, $5, NOW())
+			   RETURNING id, created_at, updated_at, name, origin, price, process, roast_profile`
+
+	err := s.db.QueryRow(ctx, query, bean.Name, bean.Origin, bean.Price, strings.ToLower(bean.Process), strings.ToLower(bean.RoastProfile)).Scan(
+		&newBean.ID,
+		&newBean.CreatedAt,
+		&newBean.UpdatedAt,
+		&newBean.Name,
+		&newBean.Origin,
+		&newBean.Price,
+		&newBean.Process,
+		&newBean.RoastProfile,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &newBean, nil
 }
