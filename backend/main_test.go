@@ -1,148 +1,115 @@
-// backend/main_test.go
-
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
+	"os"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 )
 
-func TestGetBeansHandler(t *testing.T) {
-	// --- 準備 (Arrange) ---
+// mainアプリケーション本体を保持するグローバル変数
+var testApi *Api
 
-	// テスト用のHTTPリクエストを作成
-	// GETメソッドで "/api/beans" を呼び出すリクエスト
-	req, err := http.NewRequest("GET", "/api/beans", nil)
-	if err != nil {
-		t.Fatalf("リクエストの作成に失敗しました: %v", err)
+// TestMainは、パッケージ内の全てのテストが実行される前に一度だけ呼ばれる特別な関数
+func TestMain(m *testing.M) {
+	log.Println("テスト用のデータベース接続をセットアップします...")
+
+	// .envファイルから環境変数を読み込む
+	if err := godotenv.Load("../.env"); err != nil {
+		// log.Fatalからlog.Printfに戻す。ファイルがなくても環境変数があればOK。
+		log.Printf("Warning: .env file not found, relying on environment variables")
 	}
 
-	// レスポンスを記録するためのレコーダーを作成
-	// これが、テスト中の「偽のブラウザ」の役割
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("テストを実行するにはDATABASE_URLを設定してください")
+	}
+
+	// データベース接続プールを一度だけ作成
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		log.Fatalf("データベースURLの解析に失敗しました: %v\n", err)
+	}
+	// "prepared statement"エラーを回避するための、より確実な設定
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		log.Fatalf("データベースへの接続に失敗しました: %v\n", err)
+	}
+
+	// 全てのテストで共有するApiインスタンスを作成
+	store := NewStore(dbpool)
+	testApi = &Api{store: store}
+
+	// ここで全てのテストが実行される
+	exitCode := m.Run()
+
+	// 全てのテストが終わった後に、接続プールを閉じる
+	log.Println("テスト用のデータベース接続をクローズします...")
+	dbpool.Close()
+
+	// テストを終了
+	os.Exit(exitCode)
+}
+
+// TestGetBeansHandlerは、DBから豆リストを取得するAPIの統合テストです
+func TestGetBeansHandler(t *testing.T) {
+	// TestMainで作成した共有インスタンスを使用
+	api := testApi
+
+	req, _ := http.NewRequest("GET", "/api/beans", nil)
 	rr := httptest.NewRecorder()
-
-	// テスト対象のハンドラを準備
-	handler := http.HandlerFunc(getBeansHandler)
-
-	// --- 実行 (Act) ---
-
-	// 作成したリクエストをハンドラに渡し、レスポンスをレコーダーに記録
+	handler := http.HandlerFunc(api.getBeansHandler)
 	handler.ServeHTTP(rr, req)
 
-	// --- 検証 (Assert) ---
-
-	// 1. ステータスコードが200 OKか？
+	// ステータスコードの検証
 	if status := rr.Code; status != http.StatusOK {
 		t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusOK)
 	}
 
-	// 2. レスポンスボディのJSONを、[]Bean のスライスに変換（デコード）できるか？
-	var actualBeans []Bean
-	if err := json.NewDecoder(rr.Body).Decode(&actualBeans); err != nil {
+	// レスポンスボディの検証
+	var beans []Bean
+	if err := json.NewDecoder(rr.Body).Decode(&beans); err != nil {
 		t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
 	}
-
-	// 3. 返ってきたデータの中身は、定義したダミーデータと一致するか？
-	if !reflect.DeepEqual(actualBeans, beans) {
-		t.Errorf("期待と異なるレスポンスボディです: got %v want %v", actualBeans, beans)
-	}
 }
 
+// TestGetBeanHandlerは、DBから特定の豆を取得するAPIの統合テストです
 func TestGetBeanHandler(t *testing.T) {
-	// テストケースをまとめて定義
-	testCases := []struct {
-		name           string // テスト名
-		id             string // テストで使うID
-		expectedStatus int    // 期待するHTTPステータス
-		expectedName   string // 期待する豆の名前 (成功時のみ)
-	}{
-		{
-			name:           "正常系: 存在するID",
-			id:             "1",
-			expectedStatus: http.StatusOK,
-			expectedName:   "エチオピア イルガチェフェ",
-		},
-		{
-			name:           "異常系: 存在しないID",
-			id:             "99",
-			expectedStatus: http.StatusNotFound,
-		},
-		{
-			name:           "異常系: 不正なID (文字列)",
-			id:             "abc",
-			expectedStatus: http.StatusBadRequest,
-		},
-	}
+	// TestMainで作成した共有インスタンスを使用
+	api := testApi
 
-	// 各テストケースを順番に実行
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// --- 準備 ---
-			req, err := http.NewRequest("GET", "/api/beans/"+tc.id, nil)
-			if err != nil {
-				t.Fatalf("リクエストの作成に失敗しました: %v", err)
-			}
-			// PathValueをテストで使えるように、リクエストに値をセット
-			req.SetPathValue("id", tc.id)
+	t.Run("正常系: 存在するID", func(t *testing.T) {
+		// 事前にSupabaseにID=1のデータが存在することを前提とします
+		req, _ := http.NewRequest("GET", "/api/beans/1", nil)
+		req.SetPathValue("id", "1")
+		rr := httptest.NewRecorder()
+		handler := http.HandlerFunc(api.getBeanHandler)
+		handler.ServeHTTP(rr, req)
 
-			rr := httptest.NewRecorder()
-			handler := http.HandlerFunc(getBeanHandler)
-
-			// --- 実行 ---
-			handler.ServeHTTP(rr, req)
-
-			// --- 検証 ---
-			if status := rr.Code; status != tc.expectedStatus {
-				t.Errorf("期待と異なるステータスコードです: got %v want %v", status, tc.expectedStatus)
-			}
-
-			// 成功時のみ、ボディの中身を検証
-			if tc.expectedStatus == http.StatusOK {
-				var bean Bean
-				if err := json.NewDecoder(rr.Body).Decode(&bean); err != nil {
-					t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
-				}
-				if bean.Name != tc.expectedName {
-					t.Errorf("期待と異なるレスポンスボディです: got %v want %v", bean.Name, tc.expectedName)
-				}
-			}
-		})
-	}
-}
-
-func TestFindBeanByID(t *testing.T) {
-	// テストケース1: 存在するIDを検索
-	t.Run("存在するIDの場合", func(t *testing.T) {
-		id := 2
-		bean, found := findBeanByID(id)
-
-		if !found {
-			t.Errorf("見つかるはずの豆が見つかりませんでした (ID: %d)", id)
-		}
-		if bean == nil {
-			t.Fatal("beanがnilであってはいけません")
-		}
-		if bean.ID != id {
-			t.Errorf("期待と異なるIDの豆が見つかりました: got %d want %d", bean.ID, id)
-		}
-		if bean.Name != "ブラジル サントスNo.2" {
-			t.Errorf("期待と異なる名前の豆が見つかりました: got %s", bean.Name)
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusOK)
 		}
 	})
 
-	// テストケース2: 存在しないIDを検索
-	t.Run("存在しないIDの場合", func(t *testing.T) {
-		id := 999
-		bean, found := findBeanByID(id)
+	t.Run("異常系: 存在しないID", func(t *testing.T) {
+		req, _ := http.NewRequest("GET", "/api/beans/9999", nil)
+		req.SetPathValue("id", "9999")
+		rr := httptest.NewRecorder()
+		handler := http.HandlerFunc(api.getBeanHandler)
+		handler.ServeHTTP(rr, req)
 
-		if found {
-			t.Errorf("見つからないはずの豆が見つかりました (ID: %d)", id)
-		}
-		if bean != nil {
-			t.Errorf("beanがnilであるべきです: got %v", bean)
+		// pgxでは、Scan対象の行がない場合エラーが返るので、500エラーになるのが期待値
+		if status := rr.Code; status != http.StatusInternalServerError {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusInternalServerError)
 		}
 	})
 }

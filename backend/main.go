@@ -2,63 +2,69 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
-	"os" // .envファイルを読み込むために追加
+	"os"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/joho/godotenv"
 	"github.com/rs/cors"
-	"github.com/supabase-community/postgrest-go" // Supabaseクライアントを追加
 )
 
-// Api構造体にStoreを持たせる準備
-// type Api struct {
-// 	store *Store
-// }
-
-// newRouter は、このアプリケーションのすべてのルートを含むルーターをセットアップして返す
-func newRouter() http.Handler {
-	mux := http.NewServeMux() // httpルーターをmuxとして定義
-
-	// ルートURLへのアクセス
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Backend server is running!")
-	})
-	// APIエンドポイントを登録
-	mux.HandleFunc("/api/beans", getBeansHandler)
-	mux.HandleFunc("/api/beans/{id}", getBeanHandler)
-
-	// CORS設定
-	return cors.New(cors.Options{
-		AllowedOrigins: []string{"http://localhost:5173"}, // フロントエンドのURLを許可
-		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type"},
-	}).Handler(mux)
+// Api はStore（DB接続）を保持する、私たちのアプリケーションの本体です
+type Api struct {
+	store *Store
 }
 
 func main() {
-	// .envからSupabaseの情報を取得
-	supabaseURL := os.Getenv("SUPABASE_URL")
-	supabaseKey := os.Getenv("SUPABASE_SERVICE_KEY")
-	if supabaseURL == "" || supabaseKey == "" {
-		log.Fatal("環境変数 SUPABASE_URL と SUPABASE_SERVICE_KEY を設定してください")
+
+	// アプリケーション起動時に.envファイルを読み込む
+	if err := godotenv.Load(); err != nil {
+		log.Println("Warning: .env file not found, relying on environment variables")
 	}
 
-	// SupabaseクライアントとStoreを初期化
-	headers := map[string]string{
-		"apikey":        supabaseKey,
-		"Authorization": "Bearer " + supabaseKey,
+	// .envからDB接続文字列を取得
+	databaseURL := os.Getenv("DATABASE_URL")
+	if databaseURL == "" {
+		log.Fatal("環境変数 DATABASE_URL を設定してください")
 	}
-	client := postgrest.NewClient(supabaseURL+"/rest/v1", "", headers)
-	_ = NewStore(client) // store変数はまだ使わないので、`_`で受け取る
-	//store := NewStore(client)
+
+	// データベース接続プールを作成
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		log.Fatalf("データベースURLの解析に失敗しました: %v\n", err)
+	}
+	// "prepared statement"エラーを回避するための、より確実な設定
+	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+
+	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
+	if err != nil {
+		log.Fatalf("データベースへの接続に失敗しました: %v\n", err)
+	}
+
+	defer dbpool.Close() // アプリケーション終了時に接続を閉じる
 
 	log.Println("Successfully initialized Supabase client!") // 接続準備ができたことをログに出力
 
-	// Apiインスタンスを作成（今後のための準備）
-	// api := &Api{store: store}
+	store := NewStore(dbpool)
+	api := &Api{store: store}
 
-	handler := newRouter()
+	// ルーティング設定を、apiのメソッドを呼び出すように変更
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", api.healthCheckHandler)
+	mux.HandleFunc("/api/beans", api.getBeansHandler)
+	mux.HandleFunc("/api/beans/{id}", api.getBeanHandler)
+
+	// CORS設定
+	handler := cors.New(cors.Options{
+		AllowedOrigins: []string{"http://localhost:5173"},
+		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
+		AllowedHeaders: []string{"Content-Type"},
+	}).Handler(mux)
+
 	fmt.Println("Backend server is running on http://localhost:8080")
 	log.Fatal(http.ListenAndServe(":8080", handler))
 }
