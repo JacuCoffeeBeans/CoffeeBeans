@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -14,8 +16,8 @@ import (
 	"github.com/joho/godotenv"
 )
 
-// mainアプリケーション本体を保持するグローバル変数
-var testApi *Api
+// データベース接続プールを保持するグローバル変数
+var testDbpool *pgxpool.Pool
 
 // TestMainは、パッケージ内の全てのテストが実行される前に一度だけ呼ばれる特別な関数
 func TestMain(m *testing.M) {
@@ -23,7 +25,6 @@ func TestMain(m *testing.M) {
 
 	// .envファイルから環境変数を読み込む
 	if err := godotenv.Load("../.env"); err != nil {
-		// log.Fatalからlog.Printfに戻す。ファイルがなくても環境変数があればOK。
 		log.Printf("Warning: .env file not found, relying on environment variables")
 	}
 
@@ -37,24 +38,19 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		log.Fatalf("データベースURLの解析に失敗しました: %v\n", err)
 	}
-	// "prepared statement"エラーを回避するための、より確実な設定
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
-	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
+	testDbpool, err = pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
 		log.Fatalf("データベースへの接続に失敗しました: %v\n", err)
 	}
-
-	// 全てのテストで共有するApiインスタンスを作成
-	store := NewStore(dbpool)
-	testApi = &Api{store: store}
 
 	// ここで全てのテストが実行される
 	exitCode := m.Run()
 
 	// 全てのテストが終わった後に、接続プールを閉じる
 	log.Println("テスト用のデータベース接続をクローズします...")
-	dbpool.Close()
+	testDbpool.Close()
 
 	// テストを終了
 	os.Exit(exitCode)
@@ -62,8 +58,15 @@ func TestMain(m *testing.M) {
 
 // TestGetBeansHandlerは、DBから豆リストを取得するAPIの統合テストです
 func TestGetBeansHandler(t *testing.T) {
-	// TestMainで作成した共有インスタンスを使用
-	api := testApi
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
 
 	req, _ := http.NewRequest("GET", "/api/beans", nil)
 	rr := httptest.NewRecorder()
@@ -84,13 +87,27 @@ func TestGetBeansHandler(t *testing.T) {
 
 // TestGetBeanHandlerは、DBから特定の豆を取得するAPIの統合テストです
 func TestGetBeanHandler(t *testing.T) {
-	// TestMainで作成した共有インスタンスを使用
-	api := testApi
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	// テストデータを作成
+	// このテストはトランザクション内で実行されるため、ここで作成したデータはテスト終了後に自動的にロールバックされます。
+	bean := &Bean{Name: "Test Bean for Get", Origin: "Test Origin", Price: 1000, Process: "washed", RoastProfile: "medium"}
+	createdBean, err := NewStore(tx).CreateBean(ctx, bean)
+	if err != nil {
+		t.Fatalf("テストデータの作成に失敗しました: %v", err)
+	}
+
+	store := NewStore(tx)
+	api := &Api{store: store}
 
 	t.Run("正常系: 存在するID", func(t *testing.T) {
-		// 事前にSupabaseにID=1のデータが存在することを前提とします
-		req, _ := http.NewRequest("GET", "/api/beans/1", nil)
-		req.SetPathValue("id", "1")
+		req, _ := http.NewRequest("GET", "/api/beans/"+strconv.Itoa(createdBean.ID), nil)
+		req.SetPathValue("id", strconv.Itoa(createdBean.ID))
 		rr := httptest.NewRecorder()
 		handler := http.HandlerFunc(api.getBeanHandler)
 		handler.ServeHTTP(rr, req)
@@ -107,9 +124,46 @@ func TestGetBeanHandler(t *testing.T) {
 		handler := http.HandlerFunc(api.getBeanHandler)
 		handler.ServeHTTP(rr, req)
 
-		// pgxでは、Scan対象の行がない場合エラーが返るので、500エラーになるのが期待値
 		if status := rr.Code; status != http.StatusInternalServerError {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusInternalServerError)
+		}
+	})
+}
+
+// TestCreateBeanHandler は、新しい豆を作成するAPIの統合テストです
+func TestCreateBeanHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+
+	t.Run("正常系: 新しい豆を作成", func(t *testing.T) {
+		// テスト用のリクエストボディを作成
+		body := `{"name": "Test Bean", "origin": "Test Origin", "price": 1000, "process": "Washed", "roast_profile": "Medium"}`
+		req, _ := http.NewRequest("POST", "/api/beans", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+		handler := http.HandlerFunc(api.createBeanHandler)
+		handler.ServeHTTP(rr, req)
+
+		// ステータスコードの検証
+		if status := rr.Code; status != http.StatusCreated {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusCreated)
+		}
+
+		// レスポンスボディの検証
+		var bean Bean
+		if err := json.NewDecoder(rr.Body).Decode(&bean); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+		if bean.Name != "Test Bean" {
+			t.Errorf("期待と異なる豆の名前です: got %v want %v", bean.Name, "Test Bean")
 		}
 	})
 }

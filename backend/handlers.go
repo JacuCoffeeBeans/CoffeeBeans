@@ -52,3 +52,34 @@ func (a *Api) getBeanHandler(w http.ResponseWriter, r *http.Request) {
 func (a *Api) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Backend server is running!")
 }
+
+// createBeanHandler は新しいコーヒー豆のデータを登録します
+func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
+	var bean Bean
+	if err := json.NewDecoder(r.Body).Decode(&bean); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// 必須フィールドの簡単なバリデーション
+	if bean.Name == "" || bean.Origin == "" {
+		http.Error(w, "Name and origin are required", http.StatusBadRequest)
+		return
+	}
+
+	// Store（DB）に新しいBeanを登録する
+	newBean, err := a.store.CreateBean(r.Context(), &bean)
+	if err != nil {
+		log.Printf("ERROR: Failed to create bean in DB: %v", err)
+		http.Error(w, "Failed to create bean", http.StatusInternalServerError)
+		return
+	}
+
+	// 成功したら、ステータスコード201と登録したデータを返す
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(newBean); err != nil {
+		// ここでのエラーはクライアントへのレスポンス送信の失敗
+		log.Printf("ERROR: Failed to encode new bean to JSON: %v", err)
+	}
+}
