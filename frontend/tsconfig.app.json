@@ -23,7 +23,10 @@
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
 
-    "types": ["vitest/globals"] // ← この行を追加
+    "typeRoots": ["./node_modules/@types", "./node_modules"],
+    "types": ["vitest/globals"]
+
+    
   },
   "include": ["src"]
 }

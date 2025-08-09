@@ -1,12 +1,16 @@
 import { Routes, Route } from 'react-router-dom';
 import BeanListPage from './pages/BeanListPage';
 import BeanDetailPage from './pages/BeanDetailPage';
+import NewBeanPage from './pages/NewBeanPage';
 
 function App() {
   return (
     <Routes>
       {/* ルートパス ("/") には、一覧ページを表示 */}
       <Route path="/" element={<BeanListPage />} />
+
+      {/* 新規登録ページ */}
+      <Route path="/beans/new" element={<NewBeanPage />} />
 
       {/* "/beans/:beanId" というパスには、詳細ページを表示 */}
       {/* :beanId の部分には、1や2などの具体的なIDが入る */}
