@@ -9,6 +9,8 @@ import {
   Center,
   ThemeIcon,
   Text,
+  Button,
+  Group,
 } from '@mantine/core';
 import { IconAlertCircle, IconCoffee } from '@tabler/icons-react';
 
@@ -65,9 +67,14 @@ export default function BeanListPage() {
 
   return (
     <Container mt="xl">
-      <Title order={1} mb="lg">
-        コーヒー豆リスト
-      </Title>
+      <Group justify="space-between" mb="lg">
+        <Title order={1}>
+          コーヒー豆リスト
+        </Title>
+        <Button component={Link} to="/beans/new">
+          新しい豆を登録
+        </Button>
+      </Group>
       <List
         spacing="xs"
         size="sm"
