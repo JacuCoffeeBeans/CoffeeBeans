@@ -1,22 +1,40 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, useNavigate } from 'react-router-dom';
 import BeanListPage from './pages/BeanListPage';
 import BeanDetailPage from './pages/BeanDetailPage';
 import NewBeanPage from './pages/NewBeanPage';
+import Login from './pages/Login';
+import { useAuth } from './contexts/AuthContext';
+import { useEffect } from 'react';
 
-function App() {
+const App = () => {
   return (
     <Routes>
-      {/* ルートパス ("/") には、一覧ページを表示 */}
       <Route path="/" element={<BeanListPage />} />
-
-      {/* 新規登録ページ */}
-      <Route path="/beans/new" element={<NewBeanPage />} />
-
-      {/* "/beans/:beanId" というパスには、詳細ページを表示 */}
-      {/* :beanId の部分には、1や2などの具体的なIDが入る */}
+      <Route path="/login" element={<Login />} />
       <Route path="/beans/:beanId" element={<BeanDetailPage />} />
+      <Route
+        path="/beans/new"
+        element={
+          <RequireAuth>
+            <NewBeanPage />
+          </RequireAuth>
+        }
+      />
     </Routes>
   );
-}
+};
+
+const RequireAuth = ({ children }: { children: JSX.Element }) => {
+  const { session } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (session === null) {
+      navigate('/login', { replace: true });
+    }
+  }, [session, navigate]);
+
+  return session ? children : null;
+};
 
 export default App;

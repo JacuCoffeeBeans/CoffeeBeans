@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Container,
   Title,
@@ -13,6 +13,8 @@ import {
   Group,
 } from '@mantine/core';
 import { IconAlertCircle, IconCoffee } from '@tabler/icons-react';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabaseClient';
 
 interface Bean {
   id: number;
@@ -23,6 +25,8 @@ export default function BeanListPage() {
   const [beans, setBeans] = useState<Bean[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const { session } = useAuth();
+  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchBeans = async () => {
@@ -45,6 +49,10 @@ export default function BeanListPage() {
     };
     fetchBeans();
   }, []);
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+  };
 
   if (loading) {
     return (
@@ -71,9 +79,17 @@ export default function BeanListPage() {
         <Title order={1}>
           コーヒー豆リスト
         </Title>
-        <Button component={Link} to="/beans/new">
-          新しい豆を登録
-        </Button>
+        {session ? (
+          <Group>
+            <Text>{session.user.email}</Text>
+            <Button onClick={handleLogout}>ログアウト</Button>
+            <Button component={Link} to="/beans/new">
+              新しい豆を登録
+            </Button>
+          </Group>
+        ) : (
+          <Button onClick={() => navigate('/login')}>ログイン</Button>
+        )}
       </Group>
       <List
         spacing="xs"
