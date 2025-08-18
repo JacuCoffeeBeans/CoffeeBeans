@@ -1,10 +1,12 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeAll, afterEach, afterAll, test, expect, vi } from 'vitest';
 import App from './App';
 import { MantineProvider } from '@mantine/core';
+import { AuthProvider } from './contexts/AuthContext';
+import { mockSupabase } from './setupTests';
 
-// APIのモック設定は、一覧ページが表示される際に必要なので残します
+// APIのモック設定
 const mockBeans = [{ id: 1, name: 'モック・ブルーマウンテン' }];
 beforeAll(() => {
   globalThis.fetch = vi.fn().mockResolvedValue({
@@ -12,26 +14,41 @@ beforeAll(() => {
     json: () => Promise.resolve(mockBeans),
   });
 });
-afterEach(() => vi.clearAllMocks());
+
+afterEach(() => {
+  vi.clearAllMocks();
+  vi.mocked(mockSupabase.auth.getSession).mockResolvedValue({ data: { session: null }, error: null });
+});
+
 afterAll(() => vi.restoreAllMocks());
 
-
-test('ルートパスにアクセスすると、コーヒー豆の一覧ページが表示される', async () => {
-  // テスト用に、メモリ上で動作するルーターでAppコンポーネントをラップします
-  render(
-    <MemoryRouter initialEntries={['/']}>
+const renderWithProviders = (initialEntries: string[]) => {
+  return render(
+    <MemoryRouter initialEntries={initialEntries}>
       <MantineProvider>
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </MantineProvider>
     </MemoryRouter>
   );
+};
 
-  // Appコンポーネントが"/"というパスを解釈し、
-  // BeanListPageをレンダリングした結果、以下のテキストが表示されるのを待つ
+test('ルートパスにアクセスすると、コーヒー豆の一覧ページが表示される', async () => {
+  renderWithProviders(['/']);
+
   const listTitle = await screen.findByText(/コーヒー豆リスト/i);
   const firstItem = await screen.findByText('モック・ブルーマウンテン');
 
-  // テキストが表示されていれば、正しくルーティングされたと判断できる
   expect(listTitle).toBeInTheDocument();
   expect(firstItem).toBeInTheDocument();
+});
+
+test('未ログインで/beans/newにアクセスすると、ログインページにリダイレクトされる', async () => {
+  renderWithProviders(['/beans/new']);
+
+  // ログインページにリダイレクトされ、そのタイトルが表示されるのを待つ
+  await waitFor(() => {
+    expect(screen.getByText('Welcome back!')).toBeInTheDocument();
+  });
 });

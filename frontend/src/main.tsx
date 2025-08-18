@@ -5,14 +5,17 @@ import './index.css';
 import App from './App.tsx';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
+import { AuthProvider } from './contexts/AuthContext.tsx';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
       <MantineProvider>
-        <ModalsProvider>
-          <App />
-        </ModalsProvider>
+        <AuthProvider>
+          <ModalsProvider>
+            <App />
+          </ModalsProvider>
+        </AuthProvider>
       </MantineProvider>
     </BrowserRouter>
   </StrictMode>,
