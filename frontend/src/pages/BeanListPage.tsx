@@ -1,20 +1,16 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import {
   Container,
-  Title,
   List,
   Loader,
   Alert,
   Center,
   ThemeIcon,
   Text,
-  Button,
-  Group,
+  Title,
 } from '@mantine/core';
 import { IconAlertCircle, IconCoffee } from '@tabler/icons-react';
-import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabaseClient';
 
 interface Bean {
   id: number;
@@ -25,8 +21,6 @@ export default function BeanListPage() {
   const [beans, setBeans] = useState<Bean[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const { session } = useAuth();
-  const navigate = useNavigate();
 
   useEffect(() => {
     const fetchBeans = async () => {
@@ -50,10 +44,6 @@ export default function BeanListPage() {
     fetchBeans();
   }, []);
 
-  const handleLogout = async () => {
-    await supabase.auth.signOut();
-  };
-
   if (loading) {
     return (
       <Center style={{ height: '100vh' }}>
@@ -74,43 +64,25 @@ export default function BeanListPage() {
   }
 
   return (
-    <Container mt="xl">
-      <Group justify="space-between" mb="lg">
-        <Title order={1}>
-          コーヒー豆リスト
-        </Title>
-        {session ? (
-          <Group>
-            <Text>{session.user.email}</Text>
-            <Button onClick={handleLogout}>ログアウト</Button>
-            <Button component={Link} to="/beans/new">
-              新しい豆を登録
-            </Button>
-          </Group>
-        ) : (
-          <Button onClick={() => navigate('/login')}>ログイン</Button>
-        )}
-      </Group>
-      <List
-        spacing="xs"
-        size="sm"
-        center
-        icon={
-          <ThemeIcon color="teal" size={24} radius="xl">
-            <IconCoffee size="1rem" />
-          </ThemeIcon>
-        }
-      >
-        {beans.map((bean) => (
-          <List.Item key={bean.id}>
-            <Link to={`/beans/${bean.id}`} style={{ textDecoration: 'none' }}>
-              <Text component="span" c="blue.7">
-                {bean.name}
-              </Text>
-            </Link>
-          </List.Item>
-        ))}
-      </List>
-    </Container>
+    <List
+      spacing="xs"
+      size="sm"
+      center
+      icon={
+        <ThemeIcon color="teal" size={24} radius="xl">
+          <IconCoffee size="1rem" />
+        </ThemeIcon>
+      }
+    >
+      {beans.map((bean) => (
+        <List.Item key={bean.id}>
+          <Link to={`/beans/${bean.id}`} style={{ textDecoration: 'none' }}>
+            <Text component="span" c="blue.7">
+              {bean.name}
+            </Text>
+          </Link>
+        </List.Item>
+      ))}
+    </List>
   );
 }

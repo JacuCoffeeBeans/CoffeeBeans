@@ -34,13 +34,13 @@ const renderWithProviders = (initialEntries: string[]) => {
   );
 };
 
-test('ルートパスにアクセスすると、コーヒー豆の一覧ページが表示される', async () => {
+test('ルートパスにアクセスすると、ヘッダーとコーヒー豆の一覧が表示される', async () => {
   renderWithProviders(['/']);
 
-  const listTitle = await screen.findByText(/コーヒー豆リスト/i);
+  const mainTitle = await screen.findByText(/コーヒー豆アプリ/i);
   const firstItem = await screen.findByText('モック・ブルーマウンテン');
 
-  expect(listTitle).toBeInTheDocument();
+  expect(mainTitle).toBeInTheDocument();
   expect(firstItem).toBeInTheDocument();
 });
 
@@ -51,4 +51,11 @@ test('未ログインで/beans/newにアクセスすると、ログインペー�
   await waitFor(() => {
     expect(screen.getByText('Welcome back!')).toBeInTheDocument();
   });
+});
+
+test('/loginパスにアクセスした際、ヘッダーが表示されない', () => {
+  renderWithProviders(['/login']);
+
+  const heading = screen.queryByRole('heading', { name: 'コーヒー豆アプリ' });
+  expect(heading).not.toBeInTheDocument();
 });

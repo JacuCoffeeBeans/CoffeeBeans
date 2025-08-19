@@ -5,21 +5,24 @@ import NewBeanPage from './pages/NewBeanPage';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { useEffect } from 'react';
+import Layout from './components/Layout';
 
 const App = () => {
   return (
     <Routes>
-      <Route path="/" element={<BeanListPage />} />
       <Route path="/login" element={<Login />} />
-      <Route path="/beans/:beanId" element={<BeanDetailPage />} />
-      <Route
-        path="/beans/new"
-        element={
-          <RequireAuth>
-            <NewBeanPage />
-          </RequireAuth>
-        }
-      />
+      <Route path="/" element={<Layout />}>
+        <Route index element={<BeanListPage />} />
+        <Route path="beans/:beanId" element={<BeanDetailPage />} />
+        <Route
+          path="beans/new"
+          element={
+            <RequireAuth>
+              <NewBeanPage />
+            </RequireAuth>
+          }
+        />
+      </Route>
     </Routes>
   );
 };
