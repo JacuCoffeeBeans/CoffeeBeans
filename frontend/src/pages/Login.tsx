@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import {
   TextInput,
@@ -12,6 +12,8 @@ import {
 } from '@mantine/core';
 import { useForm } from '@mantine/form';
 import { IconMail } from '@tabler/icons-react';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
 
 function GoogleIcon(props: React.ComponentPropsWithoutRef<'svg'>) {
   return (
@@ -25,9 +27,17 @@ function GoogleIcon(props: React.ComponentPropsWithoutRef<'svg'>) {
 }
 
 const Login = () => {
+  const { session } = useAuth();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'success' | 'error' | null>(null);
+
+  useEffect(() => {
+    if (session) {
+      navigate('/', { replace: true });
+    }
+  }, [session, navigate]);
 
   const form = useForm({
     initialValues: {
