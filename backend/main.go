@@ -59,6 +59,14 @@ func main() {
 	mux.HandleFunc("POST /api/beans", api.createBeanHandler)
 	mux.HandleFunc("/api/beans/{id}", api.getBeanHandler)
 
+	// ログイン済みユーザーだけがアクセスできる、テスト用のエンドポイント
+	protectedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		userID := r.Context().Value("userID")
+		fmt.Fprintf(w, "ようこそ、保護されたエリアへ！あなたのユーザーIDは: %v", userID)
+	})
+	// ハンドラをjwtAuthMiddlewareでラップする
+	mux.Handle("/api/protected", jwtAuthMiddleware(protectedHandler))
+
 	// CORS設定
 	handler := cors.New(cors.Options{
 		AllowedOrigins: []string{"http://localhost:5173"},
