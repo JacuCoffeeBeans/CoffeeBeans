@@ -1,45 +1,72 @@
 {
-	"name": "Coffee Beans Project",
-	"dockerComposeFile": "../docker-compose.yml",
-	"service": "frontend",
-	"workspaceFolder": "/workspaces/coffeebeans",
-	"shutdownAction": "stopCompose",
-	"features": {
-		"ghcr.io/devcontainers/features/go:1": {
-			"version": "1.22"
-		}
-	},
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				// Go language support
-				// Go言語のコーディングをサポートします。
-				"golang.go",
-				// Linter for JavaScript/TypeScript
-				// JavaScript/TypeScriptのコードを静的解析します。
-				"dbaeumer.vscode-eslint",
-				// Code formatter
-				// コードを自動でフォーマットします。
-				"esbenp.prettier-vscode",
-				// Git history and blame information
-				// Gitの履歴や変更者情報をエディタ上に表示します。
-				"eamodio.gitlens",
-				// Gemini Code Assist (Google Cloud Code)
-				// GeminiによるAIコーディング支援を提供します。
-				"GoogleCloudTools.cloudcode",
-				// Linter for CSS and CSS-in-JS
-				// CSSやCSS-in-JSのスタイルを静的解析します。
-				"stylelint.vscode-stylelint",
-				// Autocomplete file paths
-				// ファイルパスの入力を自動補完します。
-				"christian-kohler.path-intellisense",
-				// Rich support for Markdown
-				// Markdownファイルの作成を強力にサポートします。
-				"yzhang.markdown-all-in-one",
-				// Mermaid diagram rendering in Markdown preview
-				// MarkdownプレビューでMermaid記法の図を描画します。
-				"bierner.markdown-mermaid"
-			]
-		}
-	}
+  "name": "Coffee Beans Project",
+  "dockerComposeFile": "../docker-compose.yml",
+  "service": "frontend",
+  "workspaceFolder": "/workspaces/coffeebeans",
+  "postCreateCommand": "cd frontend && npm install",
+  "shutdownAction": "stopCompose",
+  "features": {
+    "ghcr.io/devcontainers/features/go:1": {
+      "version": "1.22"
+    }
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "editor.formatOnSave": true,
+
+        "editor.codeActionsOnSave": {
+          "source.fixAll.eslint": "explicit"
+        },
+        
+        "[typescript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[typescriptreact]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[javascript]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[json]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[markdown]": {
+          "editor.defaultFormatter": "esbenp.prettier-vscode"
+        },
+        "[go]": {
+          "editor.defaultFormatter": "golang.go"
+        }
+      },
+      "extensions": [
+        // Go language support
+        // Go言語のコーディングをサポートします。
+        "golang.go",
+        // Linter for JavaScript/TypeScript
+        // JavaScript/TypeScriptのコードを静的解析します。
+        "dbaeumer.vscode-eslint",
+        // Code formatter
+        // コードを自動でフォーマットします。
+        "esbenp.prettier-vscode",
+        // Git history and blame information
+        // Gitの履歴や変更者情報をエディタ上に表示します。
+        "eamodio.gitlens",
+        // Gemini Code Assist (Google Cloud Code)
+        // GeminiによるAIコーディング支援を提供します。
+        "GoogleCloudTools.cloudcode",
+        // Linter for CSS and CSS-in-JS
+        // CSSやCSS-in-JSのスタイルを静的解析します。
+        "stylelint.vscode-stylelint",
+        // Autocomplete file paths
+        // ファイルパスの入力を自動補完します。
+        "christian-kohler.path-intellisense",
+        // Rich support for Markdown
+        // Markdownファイルの作成を強力にサポートします。
+        "yzhang.markdown-all-in-one",
+        // Mermaid diagram rendering in Markdown preview
+        // MarkdownプレビューでMermaid記法の図を描画します。
+        "bierner.markdown-mermaid"
+      ]
+    }
+  }
 }
