@@ -37,7 +37,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("データベースURLの解析に失敗しました: %v\n", err)
 	}
-	// "prepared statement"エラーを回避するための、より確実な設定
+	// "prepared statement"エラーを回避するための設定
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
 	dbpool, err := pgxpool.NewWithConfig(context.Background(), config)
@@ -52,20 +52,25 @@ func main() {
 	store := NewStore(dbpool)
 	api := &Api{store: store}
 
-	// ルーティング設定を、apiのメソッドを呼び出すように変更
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", api.healthCheckHandler)
-	mux.HandleFunc("GET /api/beans", api.getBeansHandler)
-	mux.HandleFunc("POST /api/beans", api.createBeanHandler)
-	mux.HandleFunc("/api/beans/{id}", api.getBeanHandler)
+	// ルーティング設定
+	// 1. 各URLで何をするかのハンドラを定義する
 
-	// ログイン済みユーザーだけがアクセスできる、テスト用のエンドポイント
-	protectedHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := r.Context().Value("userID")
-		fmt.Fprintf(w, "ようこそ、保護されたエリアへ！あなたのユーザーIDは: %v", userID)
-	})
-	// ハンドラをjwtAuthMiddlewareでラップする
-	mux.Handle("/api/protected", jwtAuthMiddleware(protectedHandler))
+	// "/" へのリクエスト担当
+	healthCheckHandler := http.HandlerFunc(api.healthCheckHandler)
+
+	// "/api/beans" へのリクエスト担当 (GETとPOSTを振り分ける)
+	beansHandler := http.HandlerFunc(api.beansHandler)
+
+	// "/api/beans/{id}" へのリクエスト担当 (GET, PUT, DELETEなどを振り分ける)
+	beanDetailHandler := http.HandlerFunc(api.beanDetailHandler)
+
+	// 2. URLとハンドラを結びつける
+	mux := http.NewServeMux()
+	mux.Handle("/", healthCheckHandler)
+
+	// `/api/beans` と `/api/beans/{id}` の両方をミドルウェアで保護する
+	mux.Handle("/api/beans", jwtAuthMiddleware(beansHandler))
+	mux.Handle("/api/beans/{id}", jwtAuthMiddleware(beanDetailHandler))
 
 	// CORS設定
 	handler := cors.New(cors.Options{

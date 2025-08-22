@@ -27,6 +27,7 @@ type Bean struct {
 	Price        int       `json:"price"`
 	Process      string    `json:"process"`
 	RoastProfile string    `json:"roast_profile"`
+	UserID       string    `json:"user_id"`
 }
 
 // Store はデータベース接続またはトランザクションを保持します

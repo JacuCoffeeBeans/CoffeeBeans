@@ -16,8 +16,11 @@ func jwtAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// リクエストヘッダーから "Authorization" を取得
 		authHeader := r.Header.Get("Authorization")
+
+		// ヘッダーが空、またはBearer形式でなければ、
+		// 何もせず、そのまま次のハンドラを呼び出す
 		if authHeader == "" {
-			http.Error(w, "Authorization header is required", http.StatusUnauthorized)
+			next.ServeHTTP(w, r)
 			return
 		}
 
