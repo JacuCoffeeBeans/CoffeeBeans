@@ -76,11 +76,11 @@ func (s *Store) GetBeanByID(ctx context.Context, id int) (*Bean, error) {
 func (s *Store) CreateBean(ctx context.Context, bean *Bean) (*Bean, error) {
 	var newBean Bean
 	// SQLクエリ: 新しいデータを挿入し、その結果（IDなど）を返す
-	query := `INSERT INTO beans (name, origin, price, process, roast_profile, updated_at)
-			   VALUES ($1, $2, $3, $4, $5, NOW())
-			   RETURNING id, created_at, updated_at, name, origin, price, process, roast_profile`
+	query := `INSERT INTO beans (name, origin, price, process, roast_profile, user_id, updated_at)
+			   VALUES ($1, $2, $3, $4, $5, $6, NOW())
+			   RETURNING id, created_at, updated_at, name, origin, price, process, roast_profile, user_id`
 
-	err := s.db.QueryRow(ctx, query, bean.Name, bean.Origin, bean.Price, strings.ToLower(bean.Process), strings.ToLower(bean.RoastProfile)).Scan(
+	err := s.db.QueryRow(ctx, query, bean.Name, bean.Origin, bean.Price, strings.ToLower(bean.Process), strings.ToLower(bean.RoastProfile), bean.UserID).Scan(
 		&newBean.ID,
 		&newBean.CreatedAt,
 		&newBean.UpdatedAt,
@@ -89,6 +89,7 @@ func (s *Store) CreateBean(ctx context.Context, bean *Bean) (*Bean, error) {
 		&newBean.Price,
 		&newBean.Process,
 		&newBean.RoastProfile,
+		&newBean.UserID,
 	)
 
 	if err != nil {

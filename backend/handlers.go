@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // getBeansHandler はStoreを使ってDBから全件取得する
@@ -98,7 +99,8 @@ func (a *Api) beansHandler(w http.ResponseWriter, r *http.Request) {
 		a.getBeansHandler(w, r)
 	case http.MethodPost:
 		// POSTの場合は、contextにミドルウェアで認証済みのuserIDが入っているかチェック
-		if r.Context().Value("userID") == nil {
+		userID, ok := r.Context().Value("userID").(string)
+		if !ok || strings.TrimSpace(userID) == "" {
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
 		}
