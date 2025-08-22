@@ -141,6 +141,7 @@ func TestCreateBeanHandler(t *testing.T) {
 
 	store := NewStore(tx)
 	api := &Api{store: store}
+	handler := http.HandlerFunc(api.beansHandler) // テスト対象を、認証チェックを含むbeansHandlerに変更
 
 	t.Run("正常系: 新しい豆を作成", func(t *testing.T) {
 		// テスト用のリクエストボディを作成
@@ -148,8 +149,11 @@ func TestCreateBeanHandler(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/beans", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
+		// 認証情報をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), "userID", "test-user-id")
+		req = req.WithContext(ctxWithUser)
+
 		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(api.createBeanHandler)
 		handler.ServeHTTP(rr, req)
 
 		// ステータスコードの検証
@@ -164,6 +168,23 @@ func TestCreateBeanHandler(t *testing.T) {
 		}
 		if bean.Name != "Test Bean" {
 			t.Errorf("期待と異なる豆の名前です: got %v want %v", bean.Name, "Test Bean")
+		}
+	})
+
+	t.Run("異常系: 認証なし", func(t *testing.T) {
+		// テスト用のリクエストボディを作成
+		body := `{"name": "Unauthorized Bean", "origin": "Test Origin"}`
+		req, _ := http.NewRequest("POST", "/api/beans", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		// 認証情報はコンテキストに追加しない
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// ステータスコードの検証
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
 		}
 	})
 }
