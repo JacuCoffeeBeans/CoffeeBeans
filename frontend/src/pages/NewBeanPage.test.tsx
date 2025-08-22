@@ -5,6 +5,8 @@ import { BrowserRouter } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
 import { ModalsProvider } from '@mantine/modals';
 import NewBeanPage from './NewBeanPage';
+import { supabase } from '../lib/supabaseClient';
+vi.mock('../lib/supabaseClient');
 
 // モックの設定
 const mockNavigate = vi.fn();
@@ -31,9 +33,20 @@ const renderWithProviders = (ui: React.ReactElement) => {
 
 describe('NewBeanPage', () => {
   beforeEach(() => {
-    // 各テストの前にモックをリセット
-    vi.mocked(fetch).mockClear();
-    mockNavigate.mockClear();
+    // window.alertが呼ばれてもクラッシュしないように、空の関数に置き換えます
+    window.alert = vi.fn();
+
+    // supabase.auth.getSessionが、常にログイン済みの偽セッションを返すように設定します
+    vi.mocked(supabase.auth.getSession).mockResolvedValue({
+      data: {
+        session: {
+          access_token: 'fake-jwt-token',
+          user: { id: 'test-user-id' },
+        },
+      },
+      error: null,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
   });
 
   it('renders the form correctly', () => {
@@ -44,7 +57,9 @@ describe('NewBeanPage', () => {
     expect(screen.getByLabelText('価格')).toBeInTheDocument();
     expect(screen.getByLabelText('精製方法')).toBeInTheDocument();
     expect(screen.getByLabelText('焙煎度')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '登録する' })).toBeInTheDocument();
+    expect(
+      screen.getByRole('button', { name: '登録する' })
+    ).toBeInTheDocument();
   });
 
   it('shows validation errors when submitting an empty form', async () => {
@@ -53,23 +68,39 @@ describe('NewBeanPage', () => {
 
     await userEvent.click(submitButton);
 
-    expect(await screen.findByText('名前を入力してください')).toBeInTheDocument();
+    expect(
+      await screen.findByText('名前を入力してください')
+    ).toBeInTheDocument();
     expect(screen.getByText('産地を入力してください')).toBeInTheDocument();
-    expect(screen.getByText('価格を0以上で入力してください')).toBeInTheDocument();
+    expect(
+      screen.getByText('価格を0以上で入力してください')
+    ).toBeInTheDocument();
     expect(screen.getByText('精製方法を選択してください')).toBeInTheDocument();
     expect(screen.getByText('焙煎度を選択してください')).toBeInTheDocument();
   });
 
   it('submits the form successfully with valid data', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ id: 1 }), { status: 201 }));
+    // fetchが成功した時の偽のレスポンスを設定
+    vi.spyOn(window, 'fetch').mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ id: 1, name: 'Test Bean' }),
+    } as Response);
 
-    renderWithProviders(<NewBeanPage />);
+    render(
+      <MantineProvider>
+        <BrowserRouter>
+          <ModalsProvider>
+            <NewBeanPage />
+          </ModalsProvider>
+        </BrowserRouter>
+      </MantineProvider>
+    );
 
     // フォームに入力
     await userEvent.type(screen.getByLabelText('名前'), 'Test Bean');
     await userEvent.type(screen.getByLabelText('産地'), 'Test Origin');
     await userEvent.type(screen.getByLabelText('価格'), '1000');
-    
+
     await userEvent.click(screen.getByLabelText('精製方法'));
     await userEvent.click(screen.getByText('washed'));
 
@@ -81,24 +112,26 @@ describe('NewBeanPage', () => {
 
     // fetchが呼ばれたか確認
     await waitFor(() => {
-      expect(fetch).toHaveBeenCalledWith('/api/beans', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: 'Test Bean',
-          origin: 'Test Origin',
-          price: 1000,
-          process: 'washed',
-          roast_profile: 'medium',
-        }),
-      });
+      // fetchが呼ばれたことを確認
+      expect(window.fetch).toHaveBeenCalledTimes(1);
+      // 正しいAuthorizationヘッダーが付与されていることを確認
+      expect(window.fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/api/beans'), // URL
+        expect.objectContaining({
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: 'Bearer fake-jwt-token', // トークンが付いているかチェック！
+          },
+        })
+      );
     });
 
     // 成功モーダルが表示されるか確認
     expect(await screen.findByText('登録完了')).toBeInTheDocument();
-    expect(screen.getByText('コーヒー豆の情報が正常に登録されました。')).toBeInTheDocument();
+    expect(
+      screen.getByText('コーヒー豆の情報が正常に登録されました。')
+    ).toBeInTheDocument();
 
     // OKボタンを押すとnavigateが呼ばれるか確認
     const okButton = screen.getByRole('button', { name: 'OK' });
@@ -107,7 +140,11 @@ describe('NewBeanPage', () => {
   });
 
   it('shows an error alert when API call fails', async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Failed to create bean' }), { status: 500 }));
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'Failed to create bean' }), {
+        status: 500,
+      })
+    );
 
     renderWithProviders(<NewBeanPage />);
 

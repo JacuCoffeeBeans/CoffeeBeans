@@ -15,6 +15,7 @@ import {
 import { useForm } from '@mantine/form';
 import { useModals } from '@mantine/modals';
 import { IconAlertCircle } from '@tabler/icons-react';
+import { supabase } from '../lib/supabaseClient';
 
 interface BeanInput {
   name: string;
@@ -51,11 +52,21 @@ export default function NewBeanPage() {
     setLoading(true);
     setError(null);
 
+    // Supabaseから現在のセッション情報を取得します
+    const { data: { session } } = await supabase.auth.getSession();
+
+    // もしセッションがなければ（ログインしていなければ）処理を中断します
+    if (!session) {
+      alert('ログインが必要です。再度ログインしてください。');
+      return;
+    }
+
     try {
       const response = await fetch('/api/beans', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
         },
         body: JSON.stringify({
           ...values,
@@ -76,7 +87,7 @@ export default function NewBeanPage() {
             コーヒー豆の情報が正常に登録されました。
           </Text>
         ),
-        labels: { confirm: 'OK' },
+        labels: { confirm: 'OK', cancel: '閉じる' },
         cancelProps: { style: { display: 'none' } },
         onConfirm: () => navigate('/'),
       });
