@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 // getBeansHandler はStoreを使ってDBから全件取得する
@@ -55,6 +56,9 @@ func (a *Api) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 
 // createBeanHandler は新しいコーヒー豆のデータを登録します
 func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID := r.Context().Value("userID").(string)
+
 	var bean Bean
 	if err := json.NewDecoder(r.Body).Decode(&bean); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -66,6 +70,8 @@ func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Name and origin are required", http.StatusBadRequest)
 		return
 	}
+
+	bean.UserID = userID
 
 	// Store（DB）に新しいBeanを登録する
 	newBean, err := a.store.CreateBean(r.Context(), &bean)
@@ -81,5 +87,44 @@ func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(newBean); err != nil {
 		// ここでのエラーはクライアントへのレスポンス送信の失敗
 		log.Printf("ERROR: Failed to encode new bean to JSON: %v", err)
+	}
+}
+
+// beansHandlerは "/api/beans" へのリクエストをHTTPメソッドによって振り分ける
+// *GETの場合は認証を要求しない
+// *POSTの場合は認証を要求する
+func (a *Api) beansHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.getBeansHandler(w, r)
+	case http.MethodPost:
+		// POSTの場合は、contextにミドルウェアで認証済みのuserIDが入っているかチェック
+		userID, ok := r.Context().Value("userID").(string)
+		if !ok || strings.TrimSpace(userID) == "" {
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		a.createBeanHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// beanDetailHandlerは /api/beans/{id} へのリクエストをHTTPメソッドによって振り分ける
+// *GETの場合は認証を要求しない
+func (a *Api) beanDetailHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		// GET（詳細取得）は認証不要なので、そのままハンドラを呼ぶ
+		a.getBeanHandler(w, r)
+
+	// case http.MethodPut:
+	// 将来、更新機能をここに実装する
+
+	// case http.MethodDelete:
+	// 将来、削除機能をここに実装する
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }

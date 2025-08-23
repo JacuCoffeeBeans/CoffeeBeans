@@ -45,10 +45,25 @@ func TestMain(m *testing.M) {
 		log.Fatalf("データベースへの接続に失敗しました: %v\n", err)
 	}
 
+	// テスト用のダミーユーザーを挿入
+	dummyUserID := "00000000-0000-0000-0000-000000000000"
+	_, err = testDbpool.Exec(context.Background(), `
+		INSERT INTO auth.users (id, email, encrypted_password, created_at, updated_at)
+		VALUES ($1, $2, $3, NOW(), NOW())
+		ON CONFLICT (id) DO NOTHING;
+	`, dummyUserID, "test@example.com", "dummy_password")
+	if err != nil {
+		log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v\n", err)
+	}
+
 	// ここで全てのテストが実行される
 	exitCode := m.Run()
 
-	// 全てのテストが終わった後に、接続プールを閉じる
+	// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
+	_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = $1`, dummyUserID)
+	if err != nil {
+		log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v\n", err)
+	}
 	log.Println("テスト用のデータベース接続をクローズします...")
 	testDbpool.Close()
 
@@ -96,7 +111,7 @@ func TestGetBeanHandler(t *testing.T) {
 
 	// テストデータを作成
 	// このテストはトランザクション内で実行されるため、ここで作成したデータはテスト終了後に自動的にロールバックされます。
-	bean := &Bean{Name: "Test Bean for Get", Origin: "Test Origin", Price: 1000, Process: "washed", RoastProfile: "medium"}
+	bean := &Bean{Name: "Test Bean for Get", Origin: "Test Origin", Price: 1000, Process: "washed", RoastProfile: "medium", UserID: "00000000-0000-0000-0000-000000000000"}
 	createdBean, err := NewStore(tx).CreateBean(ctx, bean)
 	if err != nil {
 		t.Fatalf("テストデータの作成に失敗しました: %v", err)
@@ -141,6 +156,7 @@ func TestCreateBeanHandler(t *testing.T) {
 
 	store := NewStore(tx)
 	api := &Api{store: store}
+	handler := http.HandlerFunc(api.beansHandler) // テスト対象を、認証チェックを含むbeansHandlerに変更
 
 	t.Run("正常系: 新しい豆を作成", func(t *testing.T) {
 		// テスト用のリクエストボディを作成
@@ -148,8 +164,11 @@ func TestCreateBeanHandler(t *testing.T) {
 		req, _ := http.NewRequest("POST", "/api/beans", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 
+		// 認証情報をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), "userID", "00000000-0000-0000-0000-000000000000")
+		req = req.WithContext(ctxWithUser)
+
 		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(api.createBeanHandler)
 		handler.ServeHTTP(rr, req)
 
 		// ステータスコードの検証
@@ -164,6 +183,23 @@ func TestCreateBeanHandler(t *testing.T) {
 		}
 		if bean.Name != "Test Bean" {
 			t.Errorf("期待と異なる豆の名前です: got %v want %v", bean.Name, "Test Bean")
+		}
+	})
+
+	t.Run("異常系: 認証なし", func(t *testing.T) {
+		// テスト用のリクエストボディを作成
+		body := `{"name": "Unauthorized Bean", "origin": "Test Origin"}`
+		req, _ := http.NewRequest("POST", "/api/beans", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		// 認証情報はコンテキストに追加しない
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// ステータスコードの検証
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
 		}
 	})
 }
