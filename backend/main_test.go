@@ -46,24 +46,25 @@ func TestMain(m *testing.M) {
 	}
 
 	// テスト用のダミーユーザーを挿入
-	dummyUserID := "00000000-0000-0000-0000-000000000000"
-	_, err = testDbpool.Exec(context.Background(), `
-		INSERT INTO auth.users (id, email, encrypted_password, created_at, updated_at)
-		VALUES ($1, $2, $3, NOW(), NOW())
-		ON CONFLICT (id) DO NOTHING;
-	`, dummyUserID, "test@example.com", "dummy_password")
-	if err != nil {
-		log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v\n", err)
-	}
+		dummyUserID := "00000000-0000-0000-0000-000000000000"
+		otherDummyUserID := "11111111-1111-1111-1111-111111111111"
+		_, err = testDbpool.Exec(context.Background(), `
+			INSERT INTO auth.users (id, email, encrypted_password, created_at, updated_at)
+			VALUES ($1, $2, $3, NOW(), NOW()), ($4, $5, $6, NOW(), NOW())
+			ON CONFLICT (id) DO NOTHING;
+		`, dummyUserID, "test@example.com", "dummy_password", otherDummyUserID, "other@example.com", "dummy_password")
+		if err != nil {
+			log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v\n", err)
+		}
 
-	// ここで全てのテストが実行される
-	exitCode := m.Run()
+		// ここで全てのテストが実行される
+		exitCode := m.Run()
 
-	// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
-	_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = $1`, dummyUserID)
-	if err != nil {
-		log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v\n", err)
-	}
+		// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
+		_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = ANY($1)`, []string{dummyUserID, otherDummyUserID})
+		if err != nil {
+			log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v\n", err)
+		}
 	log.Println("テスト用のデータベース接続をクローズします...")
 	testDbpool.Close()
 
@@ -200,6 +201,124 @@ func TestCreateBeanHandler(t *testing.T) {
 		// ステータスコードの検証
 		if status := rr.Code; status != http.StatusUnauthorized {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+}
+
+// TestUpdateBeanHandler は、既存の豆を更新するAPIの統合テストです
+func TestUpdateBeanHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) // テスト終了時にロールバック
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	// beanDetailHandlerは、PUTリクエストの際に認証チェックを行うので、テスト対象はbeanDetailHandler
+	handler := http.HandlerFunc(api.beanDetailHandler)
+
+	// --- テストデータの準備 ---
+	// 所有者となるユーザーID
+	ownerUserID := "00000000-0000-0000-0000-000000000000"
+	// 他のユーザーのID
+	otherUserID := "11111111-1111-1111-1111-111111111111"
+
+	// 所有者が作成した豆
+	myBean := &Bean{Name: "My Bean", Origin: "My Origin", Process: "washed", RoastProfile: "medium", UserID: ownerUserID}
+	createdMyBean, err := store.CreateBean(ctx, myBean)
+	if err != nil {
+		t.Fatalf("テストデータ（自分の豆）の作成に失敗しました: %v", err)
+	}
+
+	// 他のユーザーが作成した豆
+	otherBean := &Bean{Name: "Other's Bean", Origin: "Other's Origin", Process: "natural", RoastProfile: "light", UserID: otherUserID}
+	createdOtherBean, err := store.CreateBean(ctx, otherBean)
+	if err != nil {
+		t.Fatalf("テストデータ（他人の豆）の作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 自分の豆を更新", func(t *testing.T) {
+		updateBody := `{"name": "Updated Name", "origin": "Updated Origin", "process": "honey", "roast_profile": "medium"}`
+		url := "/api/beans/" + strconv.Itoa(createdMyBean.ID)
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
+
+		// 認証情報（所有者）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var updatedBean Bean
+		if err := json.NewDecoder(rr.Body).Decode(&updatedBean); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+		if updatedBean.Name != "Updated Name" {
+			t.Errorf("期待と異なる豆の名前です: got %v want %v", updatedBean.Name, "Updated Name")
+		}
+	})
+
+	t.Run("異常系: 他人の豆を更新しようとする", func(t *testing.T) {
+		updateBody := `{"name": "Malicious Update", "origin": "malicious", "process": "washed", "roast_profile": "medium"}`
+		url := "/api/beans/" + strconv.Itoa(createdOtherBean.ID)
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", strconv.Itoa(createdOtherBean.ID))
+
+		// 認証情報（自分）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// 他人のリソースを更新しようとした場合は、Not Foundを返すのが一般的
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+
+	t.Run("異常系: 認証なしで更新しようとする", func(t *testing.T) {
+		updateBody := `{"name": "Unauthorized Update"}`
+		url := "/api/beans/" + strconv.Itoa(createdMyBean.ID)
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
+
+		// 認証情報を追加しない
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: 存在しないIDを更新しようとする", func(t *testing.T) {
+		updateBody := `{"name": "Non-existent Update", "origin": "non-existent", "process": "washed", "roast_profile": "medium"}`
+		url := "/api/beans/99999"
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", "99999")
+
+		// 認証情報をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
 		}
 	})
 }
