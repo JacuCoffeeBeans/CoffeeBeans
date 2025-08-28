@@ -98,3 +98,37 @@ func (s *Store) CreateBean(ctx context.Context, bean *Bean) (*Bean, error) {
 
 	return &newBean, nil
 }
+
+// UpdateBean は指定されたIDのコーヒー豆の情報を更新します
+func (s *Store) UpdateBean(ctx context.Context, id int, userID string, bean *Bean) (*Bean, error) {
+	var updatedBean Bean
+
+	// SQLクエリ: 既存のデータを更新し、その結果を返す
+	// WHERE句でidとuser_idの両方をチェックすることで、所有者のみが更新できるようにする
+	query := `UPDATE beans
+			   SET name = $1, origin = $2, price = $3, process = $4, roast_profile = $5, updated_at = NOW()
+			   WHERE id = $6 AND user_id = $7
+			   RETURNING id, created_at, updated_at, name, origin, price, process, roast_profile, user_id`
+
+	err := s.db.QueryRow(ctx, query, bean.Name, bean.Origin, bean.Price, strings.ToLower(bean.Process), strings.ToLower(bean.RoastProfile), id, userID).Scan(
+		&updatedBean.ID,
+		&updatedBean.CreatedAt,
+		&updatedBean.UpdatedAt,
+		&updatedBean.Name,
+		&updatedBean.Origin,
+		&updatedBean.Price,
+		&updatedBean.Process,
+		&updatedBean.RoastProfile,
+		&updatedBean.UserID,
+	)
+
+	if err != nil {
+		// pgx.ErrNoRowsは、行が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
+		if err == pgx.ErrNoRows {
+			return nil, pgx.ErrNoRows // エラーをラップせず、そのまま返す
+		}
+		return nil, err
+	}
+
+	return &updatedBean, nil
+}
