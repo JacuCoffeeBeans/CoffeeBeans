@@ -36,13 +36,13 @@ func TestMain(m *testing.M) {
 	// データベース接続プールを一度だけ作成
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		log.Fatalf("データベースURLの解析に失敗しました: %v\n", err)
+		log.Fatalf("データベースURLの解析に失敗しました: %v", err)
 	}
 	config.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 
 	testDbpool, err = pgxpool.NewWithConfig(context.Background(), config)
 	if err != nil {
-		log.Fatalf("データベースへの接続に失敗しました: %v\n", err)
+		log.Fatalf("データベースへの接続に失敗しました: %v", err)
 	}
 
 	// テスト用のダミーユーザーを挿入
@@ -54,7 +54,7 @@ func TestMain(m *testing.M) {
 			ON CONFLICT (id) DO NOTHING;
 		`, dummyUserID, "test@example.com", "dummy_password", otherDummyUserID, "other@example.com", "dummy_password")
 		if err != nil {
-			log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v\n", err)
+			log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v", err)
 		}
 
 		// ここで全てのテストが実行される
@@ -63,7 +63,7 @@ func TestMain(m *testing.M) {
 		// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
 		_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = ANY($1)`, []string{dummyUserID, otherDummyUserID})
 		if err != nil {
-			log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v\n", err)
+			log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v", err)
 		}
 	log.Println("テスト用のデータベース接続をクローズします...")
 	testDbpool.Close()
@@ -308,6 +308,114 @@ func TestUpdateBeanHandler(t *testing.T) {
 		url := "/api/beans/99999"
 		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
 		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", "99999")
+
+		// 認証情報をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+}
+
+// TestDeleteBeanHandler は、既存の豆を削除するAPIの統合テストです
+func TestDeleteBeanHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) // テスト終了時にロールバック
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	// beanDetailHandlerは、DELETEリクエストの際に認証チェックを行うので、テスト対象はbeanDetailHandler
+	handler := http.HandlerFunc(api.beanDetailHandler)
+
+	// --- テストデータの準備 ---
+	// 所有者となるユーザーID
+	ownerUserID := "00000000-0000-0000-0000-000000000000"
+	// 他のユーザーのID
+	otherUserID := "11111111-1111-1111-1111-111111111111"
+
+	// 所有者が作成した豆（削除対象）
+	myBean := &Bean{Name: "My Deletable Bean", Origin: "My Origin", Process: "washed", RoastProfile: "medium", UserID: ownerUserID}
+	createdMyBean, err := store.CreateBean(ctx, myBean)
+	if err != nil {
+		t.Fatalf("テストデータ（自分の豆）の作成に失敗しました: %v", err)
+	}
+
+	// 他のユーザーが作成した豆（削除されない対象）
+	otherBean := &Bean{Name: "Other's Bean", Origin: "Other's Origin", Process: "natural", RoastProfile: "light", UserID: otherUserID}
+	createdOtherBean, err := store.CreateBean(ctx, otherBean)
+	if err != nil {
+		t.Fatalf("テストデータ（他人の豆）の作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 自分の豆を削除", func(t *testing.T) {
+		url := "/api/beans/" + strconv.Itoa(createdMyBean.ID)
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
+
+		// 認証情報（所有者）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNoContent {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusNoContent, rr.Body.String())
+		}
+
+		// DBから削除されていることを確認
+		_, err := store.GetBeanByID(ctx, createdMyBean.ID)
+		if err == nil {
+			t.Errorf("豆がデータベースから削除されていません")
+		}
+	})
+
+	t.Run("異常系: 他人の豆を削除しようとする", func(t *testing.T) {
+		url := "/api/beans/" + strconv.Itoa(createdOtherBean.ID)
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", strconv.Itoa(createdOtherBean.ID))
+
+		// 認証情報（自分）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// 他人のリソースを削除しようとした場合は、Not Foundを返す
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+
+	t.Run("異常系: 認証なしで削除しようとする", func(t *testing.T) {
+		url := "/api/beans/" + strconv.Itoa(createdMyBean.ID)
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
+
+		// 認証情報を追加しない
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: 存在しないIDを削除しようとする", func(t *testing.T) {
+		url := "/api/beans/99999"
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
 		req.SetPathValue("id", "99999")
 
 		// 認証情報をコンテキストに追加
