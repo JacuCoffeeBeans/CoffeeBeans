@@ -134,6 +134,41 @@ func (a *Api) updateBeanHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// deleteBeanHandler は既存のコーヒー豆のデータを削除します
+func (a *Api) deleteBeanHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// URLからIDを取得
+	idStr := r.PathValue("id")
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "Invalid bean ID", http.StatusBadRequest)
+		return
+	}
+
+	// Store（DB）のBeanを削除する
+	err = a.store.DeleteBean(r.Context(), id, userID)
+	if err != nil {
+		// pgx.ErrNoRowsは、削除対象が見つからなかった（IDが違うか、所有者でない）場合に返される
+		if err.Error() == "no rows in result set" {
+			// 他のユーザーの所有物である可能性を示唆しないよう、一般的なNot Foundを返す
+			http.Error(w, "Bean not found or you don't have permission to delete it", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR: Failed to delete bean from DB: %v", err)
+		http.Error(w, "Failed to delete bean", http.StatusInternalServerError)
+		return
+	}
+
+	// 成功したら、ステータスコード204を返す
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // beansHandlerは "/api/beans" へのリクエストをHTTPメソッドによって振り分ける
 // *GETの場合は認証を要求しない
 // *POSTの場合は認証を要求する
@@ -171,8 +206,14 @@ func (a *Api) beanDetailHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		a.updateBeanHandler(w, r)
 
-	// case http.MethodDelete:
-	// 将来、削除機能をここに実装する
+	case http.MethodDelete:
+		// DELETE（削除）の場合も、認証済みユーザーである必要があるので、ここでチェック
+		userID, ok := r.Context().Value("userID").(string)
+		if !ok || strings.TrimSpace(userID) == "" {
+			http.Error(w, "Authentication required", http.StatusUnauthorized)
+			return
+		}
+		a.deleteBeanHandler(w, r)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

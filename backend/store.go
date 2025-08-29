@@ -132,3 +132,23 @@ func (s *Store) UpdateBean(ctx context.Context, id int, userID string, bean *Bea
 
 	return &updatedBean, nil
 }
+
+// DeleteBean は指定されたIDのコーヒー豆の情報を削除します
+func (s *Store) DeleteBean(ctx context.Context, id int, userID string) error {
+	// SQLクエリ: 既存のデータを削除する
+	// WHERE句でidとuser_idの両方をチェックすることで、所有者のみが削除できるようにする
+	query := `DELETE FROM beans WHERE id = $1 AND user_id = $2`
+
+	ct, err := s.db.Exec(ctx, query, id, userID)
+	if err != nil {
+		return err
+	}
+
+	// Execで、1行も影響がなかった場合、それは対象が見つからなかったことを意味する
+	// (IDが違うか、userIDが違う)
+	if ct.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
+}
