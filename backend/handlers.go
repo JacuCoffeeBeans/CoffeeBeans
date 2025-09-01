@@ -169,6 +169,28 @@ func (a *Api) deleteBeanHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// getMyBeansHandler は認証されているユーザー自身の豆リストを取得します
+func (a *Api) getMyBeansHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID, ok := r.Context().Value("userID").(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	beans, err := a.store.GetBeansByUserID(r.Context(), userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get beans from DB: %v", err)
+		http.Error(w, "Failed to get beans from DB", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(beans); err != nil {
+		http.Error(w, "Failed to encode beans to JSON", http.StatusInternalServerError)
+	}
+}
+
 // beansHandlerは "/api/beans" へのリクエストをHTTPメソッドによって振り分ける
 // *GETの場合は認証を要求しない
 // *POSTの場合は認証を要求する

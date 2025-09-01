@@ -64,6 +64,9 @@ func main() {
 	// "/api/beans/{id}" へのリクエスト担当 (GET, PUT, DELETEなどを振り分ける)
 	beanDetailHandler := http.HandlerFunc(api.beanDetailHandler)
 
+	// "/api/my/beans" へのリクエスト担当
+	myBeansHandler := http.HandlerFunc(api.getMyBeansHandler)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
@@ -71,6 +74,7 @@ func main() {
 	// `/api/beans` と `/api/beans/{id}` の両方をミドルウェアで保護する
 	mux.Handle("/api/beans", jwtAuthMiddleware(beansHandler))
 	mux.Handle("/api/beans/{id}", jwtAuthMiddleware(beanDetailHandler))
+	mux.Handle("/api/my/beans", jwtAuthMiddleware(myBeansHandler)) // 新しいルートを追加
 
 	// CORS設定
 	handler := cors.New(cors.Options{

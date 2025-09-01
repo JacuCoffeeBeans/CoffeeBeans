@@ -152,3 +152,22 @@ func (s *Store) DeleteBean(ctx context.Context, id int, userID string) error {
 
 	return nil
 }
+
+// GetBeansByUserID は指定されたユーザーIDの豆を全件取得します
+func (s *Store) GetBeansByUserID(ctx context.Context, userID string) ([]Bean, error) {
+	rows, err := s.db.Query(ctx, "SELECT id, created_at, updated_at, name, origin, price, process, roast_profile, user_id FROM beans WHERE user_id = $1 ORDER BY id DESC", userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var beans []Bean
+	for rows.Next() {
+		var b Bean
+		if err := rows.Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt, &b.Name, &b.Origin, &b.Price, &b.Process, &b.RoastProfile, &b.UserID); err != nil {
+			return nil, err
+		}
+		beans = append(beans, b)
+	}
+	return beans, nil
+}
