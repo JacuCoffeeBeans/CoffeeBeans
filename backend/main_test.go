@@ -323,6 +323,85 @@ func TestUpdateBeanHandler(t *testing.T) {
 	})
 }
 
+// TestGetMyBeansHandler は、認証されたユーザー自身の豆リストを取得するAPIの統合テストです
+func TestGetMyBeansHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx) // テスト終了時にロールバック
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	handler := http.HandlerFunc(api.getMyBeansHandler)
+
+	// --- テストデータの準備 ---
+	ownerUserID := "00000000-0000-0000-0000-000000000000"
+	otherUserID := "11111111-1111-1111-1111-111111111111"
+
+	// 所有者が2つの豆を作成
+	_, err = store.CreateBean(ctx, &Bean{Name: "My Bean 1", Origin: "Origin 1", Process: "washed", RoastProfile: "medium", UserID: ownerUserID})
+	if err != nil {
+		t.Fatalf("テストデータの作成に失敗しました: %v", err)
+	}
+	_, err = store.CreateBean(ctx, &Bean{Name: "My Bean 2", Origin: "Origin 2", Process: "natural", RoastProfile: "light", UserID: ownerUserID})
+	if err != nil {
+		t.Fatalf("テストデータの作成に失敗しました: %v", err)
+	}
+
+	// 他のユーザーが1つの豆を作成
+	_, err = store.CreateBean(ctx, &Bean{Name: "Other's Bean", Origin: "Other Origin", Process: "honey", RoastProfile: "medium", UserID: otherUserID})
+	if err != nil {
+		t.Fatalf("テストデータの作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 自分の豆リストを取得", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/my/beans", nil)
+
+		// 認証情報（所有者）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var beans []Bean
+		if err := json.NewDecoder(rr.Body).Decode(&beans); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+
+		// 取得した豆の数が2であることを確認
+		if len(beans) != 2 {
+			t.Errorf("期待と異なる数の豆が返されました: got %d want %d", len(beans), 2)
+		}
+
+		// 返された豆の所有者がすべて自分であることを確認
+		for _, b := range beans {
+			if b.UserID != ownerUserID {
+				t.Errorf("他のユーザーの豆が含まれています: userID %s", b.UserID)
+			}
+		}
+	})
+
+	t.Run("異常系: 認証なしで取得しようとする", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/my/beans", nil)
+
+		// 認証情報を追加しない
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+}
+
 // TestDeleteBeanHandler は、既存の豆を削除するAPIの統合テストです
 func TestDeleteBeanHandler(t *testing.T) {
 	ctx := context.Background()
