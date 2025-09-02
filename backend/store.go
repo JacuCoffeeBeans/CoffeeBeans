@@ -49,7 +49,7 @@ func (s *Store) GetAllBeans(ctx context.Context) ([]Bean, error) {
 	}
 	defer rows.Close()
 
-	var beans []Bean
+	beans := []Bean{}
 	for rows.Next() {
 		var b Bean
 		// 取得したデータをBean構造体にスキャン
@@ -161,7 +161,7 @@ func (s *Store) GetBeansByUserID(ctx context.Context, userID string) ([]Bean, er
 	}
 	defer rows.Close()
 
-	var beans []Bean
+	beans := []Bean{}
 	for rows.Next() {
 		var b Bean
 		if err := rows.Scan(&b.ID, &b.CreatedAt, &b.UpdatedAt, &b.Name, &b.Origin, &b.Price, &b.Process, &b.RoastProfile, &b.UserID); err != nil {
