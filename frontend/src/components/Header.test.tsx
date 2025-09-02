@@ -63,5 +63,6 @@ test('ログイン時、ユーザー情報とログアウト・登録ボタン�
 
   expect(await screen.findByText('test@example.com')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: /ログアウト/i })).toBeInTheDocument();
+  expect(screen.getByText(/マイページ/i)).toBeInTheDocument();
   expect(screen.getByText(/新しい豆を登録/i)).toBeInTheDocument();
 });
