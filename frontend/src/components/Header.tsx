@@ -22,6 +22,9 @@ const Header = () => {
         <Group>
           <Text>{session.user.email}</Text>
           <Button onClick={handleLogout}>ログアウト</Button>
+          <Button component={Link} to="/my-beans" variant="outline">
+            マイページ
+          </Button>
           <Button component={Link} to="/beans/new">
             新しい豆を登録
           </Button>
