@@ -110,7 +110,7 @@ describe('MyBeansPage', () => {
     });
 
     // 編集・削除ボタンが表示されていることを確認
-    expect(screen.getAllByRole('button', { name: '編集' })).toHaveLength(2);
+    expect(screen.getAllByRole('link', { name: '編集' })).toHaveLength(2);
     expect(screen.getAllByRole('button', { name: '削除' })).toHaveLength(2);
     expect(
       screen.getByRole('link', { name: '一覧に戻る' })

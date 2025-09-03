@@ -113,7 +113,12 @@ export default function MyBeansPage() {
                   </Text>
                 </Link>
                 <Group>
-                  <Button size="xs" variant="outline">
+                  <Button
+                    component={Link}
+                    to={`/beans/${bean.id}/edit`}
+                    size="xs"
+                    variant="outline"
+                  >
                     編集
                   </Button>
                   <Button size="xs" variant="outline" color="red">
