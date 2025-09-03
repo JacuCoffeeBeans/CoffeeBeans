@@ -18,6 +18,8 @@ interface BeanDetail {
   name: string;
   origin: string;
   price: number;
+  process: string;
+  roast_profile: string;
 }
 
 export default function BeanDetailPage() {
@@ -92,6 +94,8 @@ export default function BeanDetailPage() {
           <Text size="lg" c="dimmed" mt="xs">
             産地: {bean.origin}
           </Text>
+          <Text mt="sm">精製方法: {bean.process}</Text>
+          <Text mt="sm">焙煎度: {bean.roast_profile}</Text>
           <Text size="xl" fw={700} mt="md">
             {bean.price}円
           </Text>

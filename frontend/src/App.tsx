@@ -1,11 +1,12 @@
+import React, { useEffect } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import BeanListPage from './pages/BeanListPage';
 import BeanDetailPage from './pages/BeanDetailPage';
 import NewBeanPage from './pages/NewBeanPage';
 import MyBeansPage from './pages/MyBeansPage';
+import EditBeanPage from './pages/EditBeanPage';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
-import { useEffect } from 'react';
 import { Center, Loader } from '@mantine/core';
 import Layout from './components/Layout';
 
@@ -32,12 +33,20 @@ const App = () => {
             </RequireAuth>
           }
         />
+        <Route
+          path="beans/:beanId/edit"
+          element={
+            <RequireAuth>
+              <EditBeanPage />
+            </RequireAuth>
+          }
+        />
       </Route>
     </Routes>
   );
 };
 
-const RequireAuth = ({ children }: { children: JSX.Element }) => {
+const RequireAuth = ({ children }: { children: React.ReactElement }) => {
   const { session, isLoading } = useAuth();
   const navigate = useNavigate();
 
