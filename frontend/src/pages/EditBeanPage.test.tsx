@@ -96,10 +96,10 @@ describe('EditBeanPage', () => {
     expect(screen.getByDisplayValue('Old Origin')).toBeInTheDocument();
     expect(screen.getByDisplayValue('1200')).toBeInTheDocument();
     
-    const processSelect = screen.getByLabelText('精製方法');
+    const processSelect = screen.getByRole('textbox', { name: '精製方法' });
     expect(processSelect).toHaveValue('washed');
 
-    const roastSelect = screen.getByLabelText('焙煎度');
+    const roastSelect = screen.getByRole('textbox', { name: '焙煎度' });
     expect(roastSelect).toHaveValue('medium');
   });
 

@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 import './index.css';
 import App from './App.tsx';
 import { MantineProvider } from '@mantine/core';
+import '@mantine/notifications/styles.css';
 import { ModalsProvider } from '@mantine/modals';
 import { AuthProvider } from './contexts/AuthContext.tsx';
 

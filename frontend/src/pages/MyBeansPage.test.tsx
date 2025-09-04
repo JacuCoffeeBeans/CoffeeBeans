@@ -1,6 +1,9 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { BrowserRouter } from 'react-router-dom';
 import { MantineProvider } from '@mantine/core';
+import { ModalsProvider } from '@mantine/modals';
+import { Notifications } from '@mantine/notifications';
 import { vi } from 'vitest';
 import type { Session } from '@supabase/supabase-js';
 import { AuthProvider } from '../contexts/AuthContext';
@@ -17,7 +20,12 @@ const renderWithProviders = (ui: React.ReactElement) => {
   return render(
     <BrowserRouter>
       <MantineProvider>
-        <AuthProvider>{ui}</AuthProvider>
+        <AuthProvider>
+          <ModalsProvider>
+            <Notifications />
+            {ui}
+          </ModalsProvider>
+        </AuthProvider>
       </MantineProvider>
     </BrowserRouter>
   );
@@ -116,4 +124,112 @@ describe('MyBeansPage', () => {
       screen.getByRole('link', { name: '一覧に戻る' })
     ).toBeInTheDocument();
   });
+
+  test('豆の削除処理が成功し、リストから削除される', async () => {
+    const user = userEvent.setup();
+    const mockBeans = [
+      { id: 1, name: 'My Coffee 1' },
+      { id: 2, name: 'My Coffee 2' },
+    ];
+    // ログイン状態をモック
+    vi.mocked(supabase.auth.getSession).mockResolvedValueOnce({
+      data: { session: mockSession },
+      error: null,
+    });
+    // GET APIレスポンスをモック
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(mockBeans), { status: 200 })
+    );
+    // DELETE APIレスポンスをモック
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(null, { status: 204 })
+    );
+
+    renderWithProviders(<MyBeansPage />);
+
+    // 最初に豆が2つ表示されていることを確認
+    await waitFor(() => {
+      expect(screen.getByText('My Coffee 1')).toBeInTheDocument();
+    });
+    expect(screen.getByText('My Coffee 2')).toBeInTheDocument();
+
+    // 1つ目の豆の削除ボタンをクリック
+    const deleteButtons = screen.getAllByRole('button', { name: '削除' });
+    await user.click(deleteButtons[0]);
+
+    // モーダルが表示されるのを待つ
+    const modal = await screen.findByRole('dialog');
+
+    // モーダル内にテキストが表示されることを確認
+    expect(
+      within(modal).getByText(/本当に「My Coffee 1」を削除しますか？/)
+    ).toBeInTheDocument();
+
+    // モーダルの削除ボタンをクリック
+    const confirmButton = within(modal).getByRole('button', { name: 'はい、削除します' });
+    await user.click(confirmButton);
+
+    // DELETEリクエストが呼ばれたことを確認
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith('/api/beans/1', {
+        method: 'DELETE',
+        headers: {
+          Authorization: `Bearer ${mockSession.access_token}`,
+        },
+      });
+    });
+
+    // リストから豆が削除されていることを確認
+    await waitFor(() => {
+      expect(screen.queryByText('My Coffee 1')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('My Coffee 2')).toBeInTheDocument();
+
+    // 成功通知が表示されることを確認
+    expect(
+      await screen.findByText('コーヒー豆の情報を削除しました。')
+    ).toBeInTheDocument();
+  });
+
+  test('豆の削除処理が失敗し、エラー通知が表示される', async () => {
+    const user = userEvent.setup();
+    const mockBeans = [{ id: 1, name: 'My Coffee 1' }];
+    // ログイン状態をモック
+    vi.mocked(supabase.auth.getSession).mockResolvedValueOnce({
+      data: { session: mockSession },
+      error: null,
+    });
+    // GET APIレスポンスをモック
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify(mockBeans), { status: 200 })
+    );
+    // DELETE APIレスポンスをモック（失敗）
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ message: 'Internal Server Error' }), {
+        status: 500,
+      })
+    );
+
+    renderWithProviders(<MyBeansPage />);
+
+    // 豆が表示されていることを確認
+    await waitFor(() => {
+      expect(screen.getByText('My Coffee 1')).toBeInTheDocument();
+    });
+
+    // 削除ボタンをクリッ��
+    await user.click(screen.getByRole('button', { name: '削除' }));
+
+    // モーダルが表示されるのを待つ
+    const modal = await screen.findByRole('dialog');
+    await user.click(within(modal).getByRole('button', { name: 'はい、削除します' }));
+
+    // エラー通知が表示されることを確認
+    expect(await screen.findByText('エラー')).toBeInTheDocument();
+    expect(await screen.findByText('削除に失敗しました。')).toBeInTheDocument();
+
+    // リストから豆が削除されていないことを確認
+    expect(screen.getByText('My Coffee 1')).toBeInTheDocument();
+  });
 });
+
