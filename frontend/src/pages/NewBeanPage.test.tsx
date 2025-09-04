@@ -55,8 +55,8 @@ describe('NewBeanPage', () => {
     expect(screen.getByLabelText('名前')).toBeInTheDocument();
     expect(screen.getByLabelText('産地')).toBeInTheDocument();
     expect(screen.getByLabelText('価格')).toBeInTheDocument();
-    expect(screen.getByLabelText('精製方法')).toBeInTheDocument();
-    expect(screen.getByLabelText('焙煎度')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '精製方法' })).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: '焙煎度' })).toBeInTheDocument();
     expect(
       screen.getByRole('button', { name: '登録する' })
     ).toBeInTheDocument();
@@ -101,10 +101,10 @@ describe('NewBeanPage', () => {
     await userEvent.type(screen.getByLabelText('産地'), 'Test Origin');
     await userEvent.type(screen.getByLabelText('価格'), '1000');
 
-    await userEvent.click(screen.getByLabelText('精製方法'));
+    await userEvent.click(screen.getByRole('textbox', { name: '精製方法' }));
     await userEvent.click(screen.getByText('washed'));
 
-    await userEvent.click(screen.getByLabelText('焙煎度'));
+    await userEvent.click(screen.getByRole('textbox', { name: '焙煎度' }));
     await userEvent.click(screen.getByText('medium'));
 
     const submitButton = screen.getByRole('button', { name: '登録する' });
@@ -153,10 +153,10 @@ describe('NewBeanPage', () => {
     await userEvent.type(screen.getByLabelText('産地'), 'Test Origin');
     await userEvent.type(screen.getByLabelText('価格'), '1000');
 
-    await userEvent.click(screen.getByLabelText('精製方法'));
+    await userEvent.click(screen.getByRole('textbox', { name: '精製方法' }));
     await userEvent.click(screen.getByText('washed'));
 
-    await userEvent.click(screen.getByLabelText('焙煎度'));
+    await userEvent.click(screen.getByRole('textbox', { name: '焙煎度' }));
     await userEvent.click(screen.getByText('medium'));
 
     const submitButton = screen.getByRole('button', { name: '登録する' });

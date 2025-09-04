@@ -12,6 +12,8 @@ import {
   Button,
   Group,
 } from '@mantine/core';
+import { modals } from '@mantine/modals';
+import { notifications } from '@mantine/notifications';
 import { IconAlertCircle, IconCoffee } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -60,6 +62,49 @@ export default function MyBeansPage() {
     fetchBeans();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.access_token]); // sessionオブジェクト全体ではなく、変更されないアクセストークンを依存配列に設定
+
+  const handleDelete = (bean: Bean) => {
+    modals.openConfirmModal({
+      title: '削除の確認',
+      children: (
+        <Text size="sm">
+          本当に「{bean.name}」を削除しますか？この操作は元に戻せません。
+        </Text>
+      ),
+      labels: { confirm: 'はい、削除します', cancel: 'いいえ' },
+      onConfirm: async () => {
+        if (!session) return;
+        try {
+          const response = await fetch(`/api/beans/${bean.id}`, {
+            method: 'DELETE',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          });
+
+          if (!response.ok) {
+            throw new Error('削除に失敗しました。');
+          }
+
+          setBeans((prevBeans) =>
+            prevBeans.filter((b) => b.id !== bean.id),
+          );
+          notifications.show({
+            title: '成功',
+            message: 'コーヒー豆の情報を削除しました。',
+            color: 'green',
+          });
+        } catch (err) {
+          notifications.show({
+            title: 'エラー',
+            message:
+              err instanceof Error ? err.message : '不明なエラーが発生しました。',
+            color: 'red',
+          });
+        }
+      },
+    });
+  };
 
   if (loading) {
     return (
@@ -121,7 +166,12 @@ export default function MyBeansPage() {
                   >
                     編集
                   </Button>
-                  <Button size="xs" variant="outline" color="red">
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    color="red"
+                    onClick={() => handleDelete(bean)}
+                  >
                     削除
                   </Button>
                 </Group>
