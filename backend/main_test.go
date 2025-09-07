@@ -46,25 +46,25 @@ func TestMain(m *testing.M) {
 	}
 
 	// テスト用のダミーユーザーを挿入
-		dummyUserID := "00000000-0000-0000-0000-000000000000"
-		otherDummyUserID := "11111111-1111-1111-1111-111111111111"
-		_, err = testDbpool.Exec(context.Background(), `
+	dummyUserID := "00000000-0000-0000-0000-000000000000"
+	otherDummyUserID := "11111111-1111-1111-1111-111111111111"
+	_, err = testDbpool.Exec(context.Background(), `
 			INSERT INTO auth.users (id, email, encrypted_password, created_at, updated_at)
 			VALUES ($1, $2, $3, NOW(), NOW()), ($4, $5, $6, NOW(), NOW())
 			ON CONFLICT (id) DO NOTHING;
 		`, dummyUserID, "test@example.com", "dummy_password", otherDummyUserID, "other@example.com", "dummy_password")
-		if err != nil {
-			log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v", err)
-		}
+	if err != nil {
+		log.Fatalf("テスト用ダミーユーザーの挿入に失敗しました: %v", err)
+	}
 
-		// ここで全てのテストが実行される
-		exitCode := m.Run()
+	// ここで全てのテストが実行される
+	exitCode := m.Run()
 
-		// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
-		_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = ANY($1)`, []string{dummyUserID, otherDummyUserID})
-		if err != nil {
-			log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v", err)
-		}
+	// 全てのテストが終わった後に、ダミーユーザーを削除し、接続プールを閉じる
+	_, err = testDbpool.Exec(context.Background(), `DELETE FROM auth.users WHERE id = ANY($1)`, []string{dummyUserID, otherDummyUserID})
+	if err != nil {
+		log.Printf("Warning: テスト用ダミーユーザーの削除に失敗しました: %v", err)
+	}
 	log.Println("テスト用のデータベース接続をクローズします...")
 	testDbpool.Close()
 
@@ -166,7 +166,7 @@ func TestCreateBeanHandler(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 
 		// 認証情報をコンテキストに追加
-		ctxWithUser := context.WithValue(req.Context(), "userID", "00000000-0000-0000-0000-000000000000")
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, "00000000-0000-0000-0000-000000000000")
 		req = req.WithContext(ctxWithUser)
 
 		rr := httptest.NewRecorder()
@@ -236,7 +236,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 	otherBean := &Bean{Name: "Other's Bean", Origin: "Other's Origin", Process: "natural", RoastProfile: "light", UserID: otherUserID}
 	createdOtherBean, err := store.CreateBean(ctx, otherBean)
 	if err != nil {
-		t.Fatalf("テストデータ（他人の豆）の作成に失敗しました: %v", err)
+		t.Fatalf("テストデータ（他人の豆）の作���に失敗しました: %v", err)
 	}
 
 	t.Run("正常系: 自分の豆を更新", func(t *testing.T) {
@@ -247,7 +247,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
 
 		// 認証情報（所有者）をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -266,7 +266,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("異常系: 他人の豆を更新しようとする", func(t *testing.T) {
+	t.Run("異常系: 他人の��を更新しようとする", func(t *testing.T) {
 		updateBody := `{"name": "Malicious Update", "origin": "malicious", "process": "washed", "roast_profile": "medium"}`
 		url := "/api/beans/" + strconv.Itoa(createdOtherBean.ID)
 		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
@@ -274,7 +274,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 		req.SetPathValue("id", strconv.Itoa(createdOtherBean.ID))
 
 		// 認証情報（自分）をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -311,7 +311,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 		req.SetPathValue("id", "99999")
 
 		// 認証情報をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -319,6 +319,119 @@ func TestUpdateBeanHandler(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusNotFound {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+}
+
+// TestAddCartItemHandler は、カートに商品を追加するAPIの統合テストです
+func TestAddCartItemHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	handler := http.HandlerFunc(api.addCartItemHandler)
+
+	// --- テストデータの準備 ---
+	userID := "00000000-0000-0000-0000-000000000000"
+	// テスト用の豆を作成
+	bean := &Bean{Name: "Test Bean for Cart", Origin: "Cart Origin", Process: "washed", RoastProfile: "medium", UserID: userID}
+	createdBean, err := store.CreateBean(ctx, bean)
+	if err != nil {
+		t.Fatalf("テストデータの作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 新しい商品をカートに追加", func(t *testing.T) {
+		body := `{"bean_id": ` + strconv.Itoa(createdBean.ID) + `, "quantity": 2}`
+		req, _ := http.NewRequest(http.MethodPost, "/api/cart/items", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		// 認証情報をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, userID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var cartItem CartItem
+		if err := json.NewDecoder(rr.Body).Decode(&cartItem); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+		if cartItem.BeanID != createdBean.ID || cartItem.Quantity != 2 {
+			t.Errorf("期待と異なるカートアイテムが作成されました: got %+v", cartItem)
+		}
+	})
+
+	t.Run("正常系: 既存の商品の数量を更新", func(t *testing.T) {
+		// このテストケースの独立性を保つために、テスト前にカートの状態をクリーンにする
+		_, err := tx.Exec(ctx, "DELETE FROM cart_items WHERE bean_id = $1", createdBean.ID)
+		if err != nil {
+			t.Fatalf("テストのためにcart_itemsをクリーンアップするのに失敗しました: %v", err)
+		}
+
+		// 最初に商品を1つ追加しておく
+		firstBody := `{"bean_id": ` + strconv.Itoa(createdBean.ID) + `, "quantity": 1}`
+		firstReq, _ := http.NewRequest(http.MethodPost, "/api/cart/items", strings.NewReader(firstBody))
+		ctxWithUser := context.WithValue(firstReq.Context(), userIDKey, userID)
+		firstReq = firstReq.WithContext(ctxWithUser)
+		handler.ServeHTTP(httptest.NewRecorder(), firstReq)
+
+		// 同じ商品をさらに3つ追加
+		secondBody := `{"bean_id": ` + strconv.Itoa(createdBean.ID) + `, "quantity": 3}`
+		secondReq, _ := http.NewRequest(http.MethodPost, "/api/cart/items", strings.NewReader(secondBody))
+		secondReq = secondReq.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, secondReq)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var cartItem CartItem
+		if err := json.NewDecoder(rr.Body).Decode(&cartItem); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+		// 1 + 3 = 4 になっているはず
+		if cartItem.Quantity != 4 {
+			t.Errorf("カートアイテムの数量が正しく更新されていません: got %d want %d", cartItem.Quantity, 4)
+		}
+	})
+
+	t.Run("異常系: 認証なし", func(t *testing.T) {
+		body := `{"bean_id": 1, "quantity": 1}`
+		req, _ := http.NewRequest(http.MethodPost, "/api/cart/items", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: 不正なリクエストボディ", func(t *testing.T) {
+		body := `{"bean_id": 0, "quantity": 0}` // 不正な値
+		req, _ := http.NewRequest(http.MethodPost, "/api/cart/items", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, userID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusBadRequest)
 		}
 	})
 }
@@ -336,7 +449,7 @@ func TestGetMyBeansHandler(t *testing.T) {
 	api := &Api{store: store}
 	handler := http.HandlerFunc(api.getMyBeansHandler)
 
-	// --- テストデータの準備 ---
+	// --- テストデータの準�� ---
 	ownerUserID := "00000000-0000-0000-0000-000000000000"
 	otherUserID := "11111111-1111-1111-1111-111111111111"
 
@@ -360,7 +473,7 @@ func TestGetMyBeansHandler(t *testing.T) {
 		req, _ := http.NewRequest(http.MethodGet, "/api/my/beans", nil)
 
 		// 認証情報（所有者）をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -442,7 +555,7 @@ func TestDeleteBeanHandler(t *testing.T) {
 		req.SetPathValue("id", strconv.Itoa(createdMyBean.ID))
 
 		// 認証情報（所有者）をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -465,7 +578,7 @@ func TestDeleteBeanHandler(t *testing.T) {
 		req.SetPathValue("id", strconv.Itoa(createdOtherBean.ID))
 
 		// 認証情報（自分）をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()
@@ -498,7 +611,7 @@ func TestDeleteBeanHandler(t *testing.T) {
 		req.SetPathValue("id", "99999")
 
 		// 認証情報をコンテキストに追加
-		ctxWithOwner := context.WithValue(req.Context(), "userID", ownerUserID)
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
 		req = req.WithContext(ctxWithOwner)
 
 		rr := httptest.NewRecorder()

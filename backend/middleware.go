@@ -11,6 +11,12 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// contextKey は、コンテキストのキーとして使われる文字列の型です。
+// stringの衝突を避けるために独自の型を定義します。
+type contextKey string
+
+const userIDKey contextKey = "userID"
+
 // jwtAuthMiddleware は、JWTを検証するミドルウェアです
 func jwtAuthMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -52,7 +58,7 @@ func jwtAuthMiddleware(next http.Handler) http.Handler {
 		// トークンからクレーム（特に "sub" クレーム）を取得し、コンテキストにユーザーIDをセット
 		claims, ok := token.Claims.(jwt.MapClaims)
 		if ok && claims["sub"] != nil {
-			ctx := context.WithValue(r.Context(), "userID", claims["sub"])
+			ctx := context.WithValue(r.Context(), userIDKey, claims["sub"])
 			r = r.WithContext(ctx)
 		}
 

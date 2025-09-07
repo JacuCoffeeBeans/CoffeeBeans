@@ -171,3 +171,67 @@ func (s *Store) GetBeansByUserID(ctx context.Context, userID string) ([]Bean, er
 	}
 	return beans, nil
 }
+
+// CartItem 構造体
+type CartItem struct {
+	ID        string    `json:"id"`
+	CartID    string    `json:"cart_id"`
+	BeanID    int       `json:"bean_id"`
+	Quantity  int       `json:"quantity"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// AddCartItemRequest 構造体
+type AddCartItemRequest struct {
+	BeanID   int `json:"bean_id"`
+	Quantity int `json:"quantity"`
+}
+
+// AddOrUpdateCartItem はカートに商品を追加または更新します
+func (s *Store) AddOrUpdateCartItem(ctx context.Context, userID string, req AddCartItemRequest) (*CartItem, error) {
+	// 1. ユーザーIDに基づいてカートを取得または作成
+	var cartID string
+	err := s.db.QueryRow(ctx, "SELECT id FROM carts WHERE user_id = $1", userID).Scan(&cartID)
+	if err == pgx.ErrNoRows {
+		// カートが存在しない場合は新規作成
+		err = s.db.QueryRow(ctx, "INSERT INTO carts (user_id) VALUES ($1) RETURNING id", userID).Scan(&cartID)
+		if err != nil {
+			return nil, err
+		}
+	} else if err != nil {
+		return nil, err
+	}
+
+	// 2. カート内に同じ商品が既に存在するか確認
+	var existingItemID string
+	var currentQuantity int
+	err = s.db.QueryRow(ctx, "SELECT id, quantity FROM cart_items WHERE cart_id = $1 AND bean_id = $2", cartID, req.BeanID).Scan(&existingItemID, &currentQuantity)
+
+	var resultItem CartItem
+	if err == pgx.ErrNoRows {
+		// 3a. 存在しない場合は新規追加
+		query := `INSERT INTO cart_items (cart_id, bean_id, quantity) VALUES ($1, $2, $3)
+				  RETURNING id, cart_id, bean_id, quantity, created_at, updated_at`
+		err = s.db.QueryRow(ctx, query, cartID, req.BeanID, req.Quantity).Scan(
+			&resultItem.ID, &resultItem.CartID, &resultItem.BeanID, &resultItem.Quantity, &resultItem.CreatedAt, &resultItem.UpdatedAt,
+		)
+	} else if err != nil {
+		return nil, err
+	} else {
+		// 3b. 存在する場合は数量を更新
+		newQuantity := currentQuantity + req.Quantity
+		query := `UPDATE cart_items SET quantity = $1, updated_at = NOW() WHERE id = $2
+				  RETURNING id, cart_id, bean_id, quantity, created_at, updated_at`
+		err = s.db.QueryRow(ctx, query, newQuantity, existingItemID).Scan(
+			&resultItem.ID, &resultItem.CartID, &resultItem.BeanID, &resultItem.Quantity, &resultItem.CreatedAt, &resultItem.UpdatedAt,
+		)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &resultItem, nil
+}
+
