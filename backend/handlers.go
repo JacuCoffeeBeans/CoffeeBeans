@@ -57,7 +57,7 @@ func (a *Api) healthCheckHandler(w http.ResponseWriter, r *http.Request) {
 // createBeanHandler は新しいコーヒー豆のデータを登録します
 func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
 	// contextから、認証ミドルウェアが設定したユーザーIDを取得
-	userID := r.Context().Value("userID").(string)
+	userID := r.Context().Value(userIDKey).(string)
 
 	var bean Bean
 	if err := json.NewDecoder(r.Body).Decode(&bean); err != nil {
@@ -93,7 +93,7 @@ func (a *Api) createBeanHandler(w http.ResponseWriter, r *http.Request) {
 // updateBeanHandler は既存のコーヒー豆のデータを更新します
 func (a *Api) updateBeanHandler(w http.ResponseWriter, r *http.Request) {
 	// contextから、認証ミドルウェアが設定したユーザーIDを取得
-	userID, ok := r.Context().Value("userID").(string)
+	userID, ok := r.Context().Value(userIDKey).(string)
 	if !ok || strings.TrimSpace(userID) == "" {
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
 		return
@@ -137,7 +137,7 @@ func (a *Api) updateBeanHandler(w http.ResponseWriter, r *http.Request) {
 // deleteBeanHandler は既存のコーヒー豆のデータを削除します
 func (a *Api) deleteBeanHandler(w http.ResponseWriter, r *http.Request) {
 	// contextから、認証ミドルウェアが設定したユーザーIDを取得
-	userID, ok := r.Context().Value("userID").(string)
+	userID, ok := r.Context().Value(userIDKey).(string)
 	if !ok || strings.TrimSpace(userID) == "" {
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
 		return
@@ -172,7 +172,7 @@ func (a *Api) deleteBeanHandler(w http.ResponseWriter, r *http.Request) {
 // getMyBeansHandler は認証されているユーザー自身の豆リストを取得します
 func (a *Api) getMyBeansHandler(w http.ResponseWriter, r *http.Request) {
 	// contextから、認証ミドルウェアが設定したユーザーIDを取得
-	userID, ok := r.Context().Value("userID").(string)
+	userID, ok := r.Context().Value(userIDKey).(string)
 	if !ok || strings.TrimSpace(userID) == "" {
 		http.Error(w, "Authentication required", http.StatusUnauthorized)
 		return
@@ -200,7 +200,7 @@ func (a *Api) beansHandler(w http.ResponseWriter, r *http.Request) {
 		a.getBeansHandler(w, r)
 	case http.MethodPost:
 		// POSTの場合は、contextにミドルウェアで認証済みのuserIDが入っているかチェック
-		userID, ok := r.Context().Value("userID").(string)
+		userID, ok := r.Context().Value(userIDKey).(string)
 		if !ok || strings.TrimSpace(userID) == "" {
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
@@ -221,7 +221,7 @@ func (a *Api) beanDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodPut:
 		// PUT（更新）の場合は、認証済みユーザーである必要があるので、ここでチェック
-		userID, ok := r.Context().Value("userID").(string)
+		userID, ok := r.Context().Value(userIDKey).(string)
 		if !ok || strings.TrimSpace(userID) == "" {
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
@@ -230,7 +230,7 @@ func (a *Api) beanDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	case http.MethodDelete:
 		// DELETE（削除）の場合も、認証済みユーザーである必要があるので、ここでチェック
-		userID, ok := r.Context().Value("userID").(string)
+		userID, ok := r.Context().Value(userIDKey).(string)
 		if !ok || strings.TrimSpace(userID) == "" {
 			http.Error(w, "Authentication required", http.StatusUnauthorized)
 			return
@@ -239,5 +239,44 @@ func (a *Api) beanDetailHandler(w http.ResponseWriter, r *http.Request) {
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// addCartItemHandler はカートに商品を追加します
+func (a *Api) addCartItemHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID, ok := r.Context().Value(userIDKey).(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	var req AddCartItemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// 簡単なバリデーション
+	if req.BeanID <= 0 || req.Quantity <= 0 {
+		http.Error(w, "BeanID and quantity must be positive", http.StatusBadRequest)
+		return
+	}
+
+	// Store（DB）にカートアイテムを追加/更新
+	cartItem, err := a.store.AddOrUpdateCartItem(r.Context(), userID, req)
+	if err != nil {
+		log.Printf("ERROR: Failed to add or update cart item: %v", err)
+		// ここで、例えば "foreign key constraint" のような具体的なDBエラーをチェックして、
+		// 存在しないbean_idが指定された場合に404 Not Foundを返すことも可能
+		http.Error(w, "Failed to process cart operation", http.StatusInternalServerError)
+		return
+	}
+
+	// 成功したら、ステータスコード200と登録したデータを返す
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(cartItem); err != nil {
+		log.Printf("ERROR: Failed to encode cart item to JSON: %v", err)
 	}
 }
