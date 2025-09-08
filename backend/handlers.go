@@ -280,3 +280,33 @@ func (a *Api) addCartItemHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ERROR: Failed to encode cart item to JSON: %v", err)
 	}
 }
+
+// getCartHandler は認証されているユーザーのカートの中身を取得します
+func (a *Api) getCartHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID, ok := r.Context().Value(userIDKey).(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// Storeからカートの中身を取得
+	cartItems, err := a.store.GetCartItemsByUserID(r.Context(), userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get cart items from DB: %v", err)
+		http.Error(w, "Failed to get cart items", http.StatusInternalServerError)
+		return
+	}
+
+	// cartItemsがnilの場合（DBからは起こりにくいが）、空のスライスを返す
+	if cartItems == nil {
+		cartItems = []CartItemDetail{}
+	}
+
+	// 成功したら、カートの中身をJSONで返す
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(cartItems); err != nil {
+		log.Printf("ERROR: Failed to encode cart items to JSON: %v", err)
+	}
+}

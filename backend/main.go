@@ -70,6 +70,9 @@ func main() {
 	// "/api/cart/items" へのリクエスト担当
 	addCartItemHandler := http.HandlerFunc(api.addCartItemHandler)
 
+	// "/api/cart" へのリクエスト担当
+	getCartHandler := http.HandlerFunc(api.getCartHandler)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
@@ -79,6 +82,7 @@ func main() {
 	mux.Handle("/api/beans/{id}", jwtAuthMiddleware(beanDetailHandler))
 	mux.Handle("/api/my/beans", jwtAuthMiddleware(myBeansHandler))
 	mux.Handle("/api/cart/items", jwtAuthMiddleware(addCartItemHandler))
+	mux.Handle("/api/cart", jwtAuthMiddleware(getCartHandler))
 
 	// CORS設定
 	handler := cors.New(cors.Options{

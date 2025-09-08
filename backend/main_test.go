@@ -236,7 +236,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 	otherBean := &Bean{Name: "Other's Bean", Origin: "Other's Origin", Process: "natural", RoastProfile: "light", UserID: otherUserID}
 	createdOtherBean, err := store.CreateBean(ctx, otherBean)
 	if err != nil {
-		t.Fatalf("テストデータ（他人の豆）の作���に失敗しました: %v", err)
+		t.Fatalf("テストデータ（他人の豆）の作成に失敗しました: %v", err)
 	}
 
 	t.Run("正常系: 自分の豆を更新", func(t *testing.T) {
@@ -266,7 +266,7 @@ func TestUpdateBeanHandler(t *testing.T) {
 		}
 	})
 
-	t.Run("異常系: 他人の��を更新しようとする", func(t *testing.T) {
+	t.Run("異常系: 他人の豆を更新しようとする", func(t *testing.T) {
 		updateBody := `{"name": "Malicious Update", "origin": "malicious", "process": "washed", "roast_profile": "medium"}`
 		url := "/api/beans/" + strconv.Itoa(createdOtherBean.ID)
 		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
@@ -619,6 +619,96 @@ func TestDeleteBeanHandler(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusNotFound {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+}
+
+// TestGetCartHandler は、カートの中身を取得するAPIの統合テストです
+func TestGetCartHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	// getCartHandlerは認証が必要なので、ミドルウェアを通過した後のハンドラを直接テスト
+	handler := http.HandlerFunc(api.getCartHandler)
+
+	// --- テストデータの準備 ---
+	userID := "00000000-0000-0000-0000-000000000000"
+	otherUserID := "11111111-1111-1111-1111-111111111111" // カートが空のユーザー
+
+	// テスト用の豆を作成
+	bean, err := store.CreateBean(ctx, &Bean{Name: "Cart Test Bean", Origin: "Test", Price: 1200, Process: "natural", RoastProfile: "light", UserID: userID})
+	if err != nil {
+		t.Fatalf("テスト用の豆の作成に失敗しました: %v", err)
+	}
+
+	// userIDのユーザーのカートに商品を追加
+	_, err = store.AddOrUpdateCartItem(ctx, userID, AddCartItemRequest{BeanID: bean.ID, Quantity: 3})
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテムの作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 認証済みでカートに商品あり", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/cart", nil)
+
+		// 認証情報（カートに商品があるユーザー）をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, userID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var items []CartItemDetail
+		if err := json.NewDecoder(rr.Body).Decode(&items); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+
+		if len(items) != 1 {
+			t.Fatalf("期待と異なる数の商品が返されました: got %d want %d", len(items), 1)
+		}
+		if items[0].BeanID != bean.ID || items[0].Quantity != 3 || items[0].Name != "Cart Test Bean" {
+			t.Errorf("カートの商品情報が期待と異なります: got %+v", items[0])
+		}
+	})
+
+	t.Run("正常系: 認証済みでカートが空", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/cart", nil)
+
+		// 認証情報（カートが空のユーザー）をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, otherUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusOK)
+		}
+
+		// レスポンスボディが空のJSON配列 "[]" であることを確認
+		if body := strings.TrimSpace(rr.Body.String()); body != "[]" {
+			t.Errorf("レスポンスボディが空の配列ではありません: got %s", body)
+		}
+	})
+
+	t.Run("異常系: 認証なし", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/cart", nil)
+
+		// 認証情報をコンテキストに追加しない
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
 		}
 	})
 }

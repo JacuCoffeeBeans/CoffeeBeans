@@ -235,3 +235,68 @@ func (s *Store) AddOrUpdateCartItem(ctx context.Context, userID string, req AddC
 	return &resultItem, nil
 }
 
+// CartItemDetail 構造体は、カート内の商品の詳細情報を保持します
+type CartItemDetail struct {
+	BeanID       int    `json:"bean_id"`
+	Name         string `json:"name"`
+	Price        int    `json:"price"`
+	Quantity     int    `json:"quantity"`
+	Process      string `json:"process"`
+	RoastProfile string `json:"roast_profile"`
+	// 必要に応じて他のBeanのフィールドも追加
+}
+
+// GetCartItemsByUserID は、ユーザーのカートの中身を商品の詳細情報とともに取得します
+func (s *Store) GetCartItemsByUserID(ctx context.Context, userID string) ([]CartItemDetail, error) {
+	// 1. ユーザーIDからカートIDを取得
+	var cartID string
+	err := s.db.QueryRow(ctx, "SELECT id FROM carts WHERE user_id = $1", userID).Scan(&cartID)
+	if err == pgx.ErrNoRows {
+		// カートが存在しない場合は、空のカートとして扱う
+		return []CartItemDetail{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. カートIDを使って、cart_itemsとbeansをJOINして商品情報を取得
+	query := `
+		SELECT
+			ci.bean_id,
+			b.name,
+			b.price,
+			ci.quantity,
+			b.process,
+			b.roast_profile
+		FROM
+			cart_items ci
+		JOIN
+			beans b ON ci.bean_id = b.id
+		WHERE
+			ci.cart_id = $1
+		ORDER BY
+			ci.created_at DESC;
+	`
+	rows, err := s.db.Query(ctx, query, cartID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []CartItemDetail
+	for rows.Next() {
+		var item CartItemDetail
+		if err := rows.Scan(&item.BeanID, &item.Name, &item.Price, &item.Quantity, &item.Process, &item.RoastProfile); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+
+	// rows.Err()で、ループ中に発生したエラーを確認
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// カートに商品がない場合、itemsは空のスライスになる
+	return items, nil
+}
