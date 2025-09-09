@@ -449,7 +449,7 @@ func TestGetMyBeansHandler(t *testing.T) {
 	api := &Api{store: store}
 	handler := http.HandlerFunc(api.getMyBeansHandler)
 
-	// --- テストデータの準�� ---
+	// --- テストデータの準備 ---
 	ownerUserID := "00000000-0000-0000-0000-000000000000"
 	otherUserID := "11111111-1111-1111-1111-111111111111"
 
@@ -709,6 +709,247 @@ func TestGetCartHandler(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusUnauthorized {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+}
+
+// TestUpdateCartItemAPI は、カート内の商品の数量を更新するAPIの統合テストです
+func TestUpdateCartItemAPI(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	handler := http.HandlerFunc(api.cartItemDetailHandler)
+
+	// --- テストデータの準備 ---
+	ownerUserID := "00000000-0000-0000-0000-000000000000"
+	otherUserID := "11111111-1111-1111-1111-111111111111"
+
+	// テスト用の豆を作成 (自分用)
+	myBean, err := store.CreateBean(ctx, &Bean{Name: "Update Cart Test Bean", Origin: "Test", Process: "washed", RoastProfile: "medium", UserID: ownerUserID})
+	if err != nil {
+		t.Fatalf("テスト用の豆の作成に失敗しました: %v", err)
+	}
+	// テスト用の豆を作成 (他人用)
+	otherBean, err := store.CreateBean(ctx, &Bean{Name: "Other's Cart Test Bean", Origin: "Test", Process: "natural", RoastProfile: "light", UserID: otherUserID})
+	if err != nil {
+		t.Fatalf("テスト用の豆（他人用）の作成に失敗しました: %v", err)
+	}
+
+	// 所有者のカートに商品を追加
+	myCartItem, err := store.AddOrUpdateCartItem(ctx, ownerUserID, AddCartItemRequest{BeanID: myBean.ID, Quantity: 1})
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム（自分）の作成に失敗しました: %v", err)
+	}
+
+	// 他のユーザーのカートに商品を追加
+	otherCartItem, err := store.AddOrUpdateCartItem(ctx, otherUserID, AddCartItemRequest{BeanID: otherBean.ID, Quantity: 2})
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム（他人）の作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 自分のカートアイテムの数量を更新", func(t *testing.T) {
+		updateBody := `{"quantity": 5}`
+		url := "/api/cart/items/" + myCartItem.ID
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", myCartItem.ID)
+
+		// 認証情報（所有者）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var updatedItem CartItem
+		if err := json.NewDecoder(rr.Body).Decode(&updatedItem); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+		if updatedItem.Quantity != 5 {
+			t.Errorf("数量が正しく更新されていません: got %d want %d", updatedItem.Quantity, 5)
+		}
+	})
+
+	t.Run("異常系: 他人のカートアイテムを更新しようとする", func(t *testing.T) {
+		updateBody := `{"quantity": 10}`
+		url := "/api/cart/items/" + otherCartItem.ID
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", otherCartItem.ID)
+
+		// 認証情報（自分）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+
+	t.Run("異常系: 認証なしで更新しようとする", func(t *testing.T) {
+		updateBody := `{"quantity": 3}`
+		url := "/api/cart/items/" + myCartItem.ID
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", myCartItem.ID)
+
+		// 認証情報を追加しない
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: 数量に0を指定する", func(t *testing.T) {
+		updateBody := `{"quantity": 0}`
+		url := "/api/cart/items/" + myCartItem.ID
+		req, _ := http.NewRequest(http.MethodPut, url, strings.NewReader(updateBody))
+		req.Header.Set("Content-Type", "application/json")
+		req.SetPathValue("id", myCartItem.ID)
+
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusBadRequest)
+		}
+	})
+}
+
+// TestDeleteCartItemAPI は、カートから商品を削除するAPIの統合テストです
+func TestDeleteCartItemAPI(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	handler := http.HandlerFunc(api.cartItemDetailHandler)
+
+	// --- テストデータの準備 ---
+	ownerUserID := "00000000-0000-0000-0000-000000000000"
+	otherUserID := "11111111-1111-1111-1111-111111111111"
+
+	// テスト用の豆を作成 (自分用)
+	myBean, err := store.CreateBean(ctx, &Bean{Name: "Delete Cart Test Bean", Origin: "Test", Process: "washed", RoastProfile: "medium", UserID: ownerUserID})
+	if err != nil {
+		t.Fatalf("テスト用の豆の作成に失敗しました: %v", err)
+	}
+	// テスト用の豆を作成 (他人用)
+	otherBean, err := store.CreateBean(ctx, &Bean{Name: "Other's Delete Cart Test Bean", Origin: "Test", Process: "natural", RoastProfile: "light", UserID: otherUserID})
+	if err != nil {
+		t.Fatalf("テスト用の豆（他人用）の作成に失敗しました: %v", err)
+	}
+
+	// 所有者のカートに商品を追加（削除対象）
+	myCartItem, err := store.AddOrUpdateCartItem(ctx, ownerUserID, AddCartItemRequest{BeanID: myBean.ID, Quantity: 1})
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム（自分）の作成に失敗しました: %v", err)
+	}
+
+	// 他のユーザーのカートに商品を追加（削除されない対象）
+	otherCartItem, err := store.AddOrUpdateCartItem(ctx, otherUserID, AddCartItemRequest{BeanID: otherBean.ID, Quantity: 2})
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム（他人）の作成に失敗しました: %v", err)
+	}
+
+	t.Run("正常系: 自分のカートアイテムを削除", func(t *testing.T) {
+		url := "/api/cart/items/" + myCartItem.ID
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", myCartItem.ID)
+
+		// 認証情報（所有者）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNoContent {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusNoContent, rr.Body.String())
+		}
+
+		// DBから削除されていることを確認
+		// ユーザーのカートを取得し、アイテムが存在しないことを確認する
+		items, err := store.GetCartItemsByUserID(ctx, ownerUserID)
+		if err != nil {
+			t.Fatalf("カートアイテムの取得に失敗しました: %v", err)
+		}
+		if len(items) != 0 {
+			t.Errorf("カートアイテムがデータベースから削除されていません")
+		}
+	})
+
+	t.Run("異常系: 他人のカートアイテムを削除しようとする", func(t *testing.T) {
+		url := "/api/cart/items/" + otherCartItem.ID
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", otherCartItem.ID)
+
+		// 認証情報（自分）をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+
+	t.Run("異常系: 認証なしで削除しようとする", func(t *testing.T) {
+		// このテストケースのために、削除されていない新しいアイテムを準備
+		tempItem, _ := store.AddOrUpdateCartItem(ctx, ownerUserID, AddCartItemRequest{BeanID: myBean.ID, Quantity: 99})
+		url := "/api/cart/items/" + tempItem.ID
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", tempItem.ID)
+
+		// 認証情報を追加しない
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: 存在しないIDを削除しようとする", func(t *testing.T) {
+		// 存在しない数値形式のID
+		nonExistentID := "999999"
+		url := "/api/cart/items/" + nonExistentID
+		req, _ := http.NewRequest(http.MethodDelete, url, nil)
+		req.SetPathValue("id", nonExistentID)
+
+		// 認証情報をコンテキストに追加
+		ctxWithOwner := context.WithValue(req.Context(), userIDKey, ownerUserID)
+		req = req.WithContext(ctxWithOwner)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusNotFound {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
 		}
 	})
 }

@@ -310,3 +310,95 @@ func (a *Api) getCartHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("ERROR: Failed to encode cart items to JSON: %v", err)
 	}
 }
+
+// cartItemDetailHandlerは /api/cart/items/{id} へのリクエストをHTTPメソッドによって振り分ける
+func (a *Api) cartItemDetailHandler(w http.ResponseWriter, r *http.Request) {
+	// 認証済みユーザーである必要があるので、ここでチェック
+	userID, ok := r.Context().Value(userIDKey).(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodPut:
+		a.updateCartItemHandler(w, r)
+	case http.MethodDelete:
+		a.deleteCartItemHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// updateCartItemHandler はカート内の商品の数量を更新します
+func (a *Api) updateCartItemHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID := r.Context().Value(userIDKey).(string)
+
+	// URLからIDを取得
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		http.Error(w, "Cart item ID is required", http.StatusBadRequest)
+		return
+	}
+
+	var req UpdateCartItemRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// 数量は1以上であるべき
+	if req.Quantity <= 0 {
+		http.Error(w, "Quantity must be positive", http.StatusBadRequest)
+		return
+	}
+
+	// Store（DB）のカートアイテムを更新する
+	updatedItem, err := a.store.UpdateCartItemQuantity(r.Context(), idStr, userID, req.Quantity)
+	if err != nil {
+		// pgx.ErrNoRowsは、更新対象が見つからなかった（IDが違うか、所有者でない）場合に返される
+		if err.Error() == "no rows in result set" {
+			http.Error(w, "Cart item not found or you don't have permission to update it", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR: Failed to update cart item in DB: %v", err)
+		http.Error(w, "Failed to update cart item", http.StatusInternalServerError)
+		return
+	}
+
+	// 成功したら、更新後のデータを返す
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(updatedItem); err != nil {
+		log.Printf("ERROR: Failed to encode updated cart item to JSON: %v", err)
+	}
+}
+
+// deleteCartItemHandler はカートから商品を削除します
+func (a *Api) deleteCartItemHandler(w http.ResponseWriter, r *http.Request) {
+	// contextから、認証ミドルウェアが設定したユーザーIDを取得
+	userID := r.Context().Value(userIDKey).(string)
+
+	// URLからIDを取得
+	idStr := r.PathValue("id")
+	if idStr == "" {
+		http.Error(w, "Cart item ID is required", http.StatusBadRequest)
+		return
+	}
+
+	// Store（DB）のカートアイテムを削除する
+	err := a.store.DeleteCartItem(r.Context(), idStr, userID)
+	if err != nil {
+		// pgx.ErrNoRowsは、削除対象が見つからなかった（IDが違うか、所有者でない）場合に返される
+		if err.Error() == "no rows in result set" {
+			http.Error(w, "Cart item not found or you don't have permission to delete it", http.StatusNotFound)
+			return
+		}
+		log.Printf("ERROR: Failed to delete cart item from DB: %v", err)
+		http.Error(w, "Failed to delete cart item", http.StatusInternalServerError)
+		return
+	}
+
+	// 成功したら、ステータスコード204を返す
+	w.WriteHeader(http.StatusNoContent)
+}

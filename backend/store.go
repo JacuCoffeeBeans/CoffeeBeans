@@ -237,6 +237,7 @@ func (s *Store) AddOrUpdateCartItem(ctx context.Context, userID string, req AddC
 
 // CartItemDetail 構造体は、カート内の商品の詳細情報を保持します
 type CartItemDetail struct {
+	ID           string `json:"id"` // cart_itemsテーブルのID
 	BeanID       int    `json:"bean_id"`
 	Name         string `json:"name"`
 	Price        int    `json:"price"`
@@ -262,6 +263,7 @@ func (s *Store) GetCartItemsByUserID(ctx context.Context, userID string) ([]Cart
 	// 2. カートIDを使って、cart_itemsとbeansをJOINして商品情報を取得
 	query := `
 		SELECT
+			ci.id,
 			ci.bean_id,
 			b.name,
 			b.price,
@@ -286,7 +288,7 @@ func (s *Store) GetCartItemsByUserID(ctx context.Context, userID string) ([]Cart
 	var items []CartItemDetail
 	for rows.Next() {
 		var item CartItemDetail
-		if err := rows.Scan(&item.BeanID, &item.Name, &item.Price, &item.Quantity, &item.Process, &item.RoastProfile); err != nil {
+		if err := rows.Scan(&item.ID, &item.BeanID, &item.Name, &item.Price, &item.Quantity, &item.Process, &item.RoastProfile); err != nil {
 			return nil, err
 		}
 		items = append(items, item)
@@ -299,4 +301,64 @@ func (s *Store) GetCartItemsByUserID(ctx context.Context, userID string) ([]Cart
 
 	// カートに商品がない場合、itemsは空のスライスになる
 	return items, nil
+}
+
+// UpdateCartItemRequest 構造体
+type UpdateCartItemRequest struct {
+	Quantity int `json:"quantity"`
+}
+
+// UpdateCartItemQuantity はカート内の商品の数量を更新します。所有権もチェックします。
+func (s *Store) UpdateCartItemQuantity(ctx context.Context, cartItemID string, userID string, quantity int) (*CartItem, error) {
+	query := `
+		UPDATE cart_items ci
+		SET quantity = $1, updated_at = NOW()
+		FROM carts c
+		WHERE ci.id = $2
+		  AND ci.cart_id = c.id
+		  AND c.user_id = $3
+		RETURNING ci.id, ci.cart_id, ci.bean_id, ci.quantity, ci.created_at, ci.updated_at;
+	`
+	var updatedItem CartItem
+	err := s.db.QueryRow(ctx, query, quantity, cartItemID, userID).Scan(
+		&updatedItem.ID,
+		&updatedItem.CartID,
+		&updatedItem.BeanID,
+		&updatedItem.Quantity,
+		&updatedItem.CreatedAt,
+		&updatedItem.UpdatedAt,
+	)
+
+	if err != nil {
+		// pgx.ErrNoRowsは、行が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
+		if err == pgx.ErrNoRows {
+			return nil, pgx.ErrNoRows
+		}
+		return nil, err
+	}
+
+	return &updatedItem, nil
+}
+
+// DeleteCartItem はカートから商品を削除します。所有権もチェックします。
+func (s *Store) DeleteCartItem(ctx context.Context, cartItemID string, userID string) error {
+	query := `
+		DELETE FROM cart_items ci
+		USING carts c
+		WHERE ci.id = $1
+		  AND ci.cart_id = c.id
+		  AND c.user_id = $2;
+	`
+	ct, err := s.db.Exec(ctx, query, cartItemID, userID)
+	if err != nil {
+		return err
+	}
+
+	// Execで、1行も影響がなかった場合、それは対象が見つからなかったことを意味する
+	// (IDが違うか、userIDが違う)
+	if ct.RowsAffected() == 0 {
+		return pgx.ErrNoRows
+	}
+
+	return nil
 }
