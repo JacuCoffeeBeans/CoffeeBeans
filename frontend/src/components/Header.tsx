@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { Title, Button, Group, Text } from '@mantine/core';
+import { Title, Button, Group, Text, ActionIcon } from '@mantine/core';
+import { IconShoppingCart } from '@tabler/icons-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabaseClient';
 
@@ -28,6 +29,9 @@ const Header = () => {
           <Button component={Link} to="/beans/new">
             新しい豆を登録
           </Button>
+          <ActionIcon component={Link} to="/cart" variant="default" size="lg" aria-label="カート">
+            <IconShoppingCart size={20} />
+          </ActionIcon>
         </Group>
       ) : (
         <Button onClick={() => navigate('/login')}>ログイン</Button>
