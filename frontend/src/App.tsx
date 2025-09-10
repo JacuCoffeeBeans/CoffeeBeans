@@ -5,6 +5,7 @@ import BeanDetailPage from './pages/BeanDetailPage';
 import NewBeanPage from './pages/NewBeanPage';
 import MyBeansPage from './pages/MyBeansPage';
 import EditBeanPage from './pages/EditBeanPage';
+import CartPage from './pages/CartPage'; // 追加
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { Center, Loader } from '@mantine/core';
@@ -38,6 +39,14 @@ const App = () => {
           element={
             <RequireAuth>
               <EditBeanPage />
+            </RequireAuth>
+          }
+        />
+        <Route // 追加
+          path="cart"
+          element={
+            <RequireAuth>
+              <CartPage />
             </RequireAuth>
           }
         />

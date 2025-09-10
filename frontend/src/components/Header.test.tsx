@@ -65,4 +65,5 @@ test('ログイン時、ユーザー情報とログアウト・登録ボタン�
   expect(screen.getByRole('button', { name: /ログアウト/i })).toBeInTheDocument();
   expect(screen.getByText(/マイページ/i)).toBeInTheDocument();
   expect(screen.getByText(/新しい豆を登録/i)).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /カート/i })).toBeInTheDocument(); // カートアイコンのリンクをテスト
 });
