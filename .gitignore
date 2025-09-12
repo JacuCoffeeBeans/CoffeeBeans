@@ -46,3 +46,8 @@ node_modules
 # Go
 /backend/tmp/
 /backend/air_errors.log
+
+# ------------------------------------------------
+# Gemini
+# ------------------------------------------------
+forgemini/
