@@ -13,7 +13,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/joho/godotenv"
 )
 
 // データベース接続プールを保持するグローバル変数
@@ -24,9 +23,10 @@ func TestMain(m *testing.M) {
 	log.Println("テスト用のデータベース接続をセットアップします...")
 
 	// .envファイルから環境変数を読み込む
-	if err := godotenv.Load("../.env"); err != nil {
-		log.Printf("Warning: .env file not found, relying on environment variables")
-	}
+	// if err := godotenv.Load("../.env"); err != nil {
+	// 	log.Printf("Warning: .env file not found, relying on environment variables")
+	// }
+	// docker-compose.ymlのenv_fileで環境変数が設定されるため、↑は不要
 
 	databaseURL := os.Getenv("DATABASE_URL")
 	if databaseURL == "" {
@@ -950,6 +950,119 @@ func TestDeleteCartItemAPI(t *testing.T) {
 
 		if status := rr.Code; status != http.StatusNotFound {
 			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusNotFound)
+		}
+	})
+}
+
+// TestCreatePaymentIntentHandler は、StripeのPaymentIntentを作成するAPIの統合テストです
+func TestCreatePaymentIntentHandler(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testDbpool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	store := NewStore(tx)
+	api := &Api{store: store}
+	handler := http.HandlerFunc(api.createPaymentIntentHandler)
+
+	// --- テストデータの準備 ---
+	userID := "00000000-0000-0000-0000-000000000000"
+	emptyCartUserID := "11111111-1111-1111-1111-111111111111"
+
+	// テスト用の豆を作成
+	bean1, err := store.CreateBean(ctx, &Bean{Name: "PI Test Bean 1", Origin: "Test", Price: 1000, Process: "washed", RoastProfile: "medium", UserID: userID})
+	if err != nil {
+		t.Fatalf("テスト用の豆1の作成に失敗しました: %v", err)
+	}
+	bean2, err := store.CreateBean(ctx, &Bean{Name: "PI Test Bean 2", Origin: "Test", Price: 500, Process: "natural", RoastProfile: "light", UserID: userID})
+	if err != nil {
+		t.Fatalf("テスト用の豆2の作成に失敗しました: %v", err)
+	}
+
+	// userIDのユーザーのカートに商品を追加
+	_, err = store.AddOrUpdateCartItem(ctx, userID, AddCartItemRequest{BeanID: bean1.ID, Quantity: 2}) // 1000 * 2 = 2000
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム1の作成に失敗しました: %v", err)
+	}
+	_, err = store.AddOrUpdateCartItem(ctx, userID, AddCartItemRequest{BeanID: bean2.ID, Quantity: 3}) // 500 * 3 = 1500
+	if err != nil {
+		t.Fatalf("テスト用のカートアイテム2の作成に失敗しました: %v", err)
+	}
+	// 合計金額は 2000 + 1500 = 3500円
+
+	t.Run("正常系: カートに商品がある場合にclient_secretを取得", func(t *testing.T) {
+		// .envからStripeキーを読み込めていないとテストが失敗するので注意
+		if os.Getenv("STRIPE_SECRET_KEY") == "" {
+			t.Skip("STRIPE_SECRET_KEYが設定されていないため、テストをスキップします")
+		}
+
+		req, _ := http.NewRequest(http.MethodPost, "/api/checkout/payment-intent", nil)
+
+		// 認証情報をコンテキストに追加
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, userID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusOK {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v, body: %s", status, http.StatusOK, rr.Body.String())
+		}
+
+		var response map[string]string
+		if err := json.NewDecoder(rr.Body).Decode(&response); err != nil {
+			t.Fatalf("レスポンスボディのJSONデコードに失敗しました: %v", err)
+		}
+
+		clientSecret, ok := response["client_secret"]
+		if !ok {
+			t.Errorf("レスポンスにclient_secretが含まれていません")
+		}
+		if !strings.HasPrefix(clientSecret, "pi_") {
+			t.Errorf("client_secretの形式が正しくありません: got %s", clientSecret)
+		}
+	})
+
+	t.Run("異常系: カートが空の場合", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodPost, "/api/checkout/payment-intent", nil)
+
+		// カートが空のユーザーで認証
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, emptyCartUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusBadRequest {
+			t.Errorf("期待と異なるステータスコ��ドです: got %v want %v", status, http.StatusBadRequest)
+		}
+	})
+
+	t.Run("異常系: 認証なし", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodPost, "/api/checkout/payment-intent", nil)
+
+		// 認証情報なし
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusUnauthorized {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusUnauthorized)
+		}
+	})
+
+	t.Run("異常系: POST以外のメソッド", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "/api/checkout/payment-intent", nil)
+
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, userID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		if status := rr.Code; status != http.StatusMethodNotAllowed {
+			t.Errorf("期待と異なるステータスコードです: got %v want %v", status, http.StatusMethodNotAllowed)
 		}
 	})
 }
