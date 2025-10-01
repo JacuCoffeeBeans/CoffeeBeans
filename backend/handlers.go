@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
+
+	"github.com/stripe/stripe-go/v72"
+	"github.com/stripe/stripe-go/v72/paymentintent"
 )
 
 // getBeansHandler はStoreを使ってDBから全件取得する
@@ -401,4 +405,67 @@ func (a *Api) deleteCartItemHandler(w http.ResponseWriter, r *http.Request) {
 
 	// 成功したら、ステータスコード204を返す
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// createPaymentIntentHandler はStripeのPaymentIntentを作成し、client_secretを返します
+func (a *Api) createPaymentIntentHandler(w http.ResponseWriter, r *http.Request) {
+	// 認証済みユーザーでなければエラー
+	userID, ok := r.Context().Value(userIDKey).(string)
+	if !ok || strings.TrimSpace(userID) == "" {
+		http.Error(w, "Authentication required", http.StatusUnauthorized)
+		return
+	}
+
+	// POSTメソッドでなければエラー
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// ユーザーのカート情報をDBから取得
+	cartItems, err := a.store.GetCartItemsByUserID(r.Context(), userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get cart items from DB: %v", err)
+		http.Error(w, "Failed to get cart items", http.StatusInternalServerError)
+		return
+	}
+
+	// カートが空の場合はエラー
+	if len(cartItems) == 0 {
+		http.Error(w, "Cart is empty", http.StatusBadRequest)
+		return
+	}
+
+	// 合計金額を計算
+	var totalAmount int64
+	for _, item := range cartItems {
+		totalAmount += int64(item.Price) * int64(item.Quantity)
+	}
+
+	// StripeのAPIキーを設定
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
+
+	// PaymentIntentを作成
+	params := &stripe.PaymentIntentParams{
+		Amount:   stripe.Int64(totalAmount),
+		Currency: stripe.String(string(stripe.CurrencyJPY)), // 通貨をJPYに設定
+		AutomaticPaymentMethods: &stripe.PaymentIntentAutomaticPaymentMethodsParams{
+			Enabled: stripe.Bool(true),
+		},
+	}
+
+	pi, err := paymentintent.New(params)
+	if err != nil {
+		log.Printf("ERROR: Failed to create PaymentIntent: %v", err)
+		http.Error(w, "Failed to create PaymentIntent", http.StatusInternalServerError)
+		return
+	}
+
+	// レスポンスを作成
+	response := map[string]string{"client_secret": pi.ClientSecret}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(response); err != nil {
+		log.Printf("ERROR: Failed to encode response to JSON: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
 }

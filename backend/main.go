@@ -76,23 +76,32 @@ func main() {
 	// "/api/cart/items/{id}" へのリクエスト担当 (PUT, DELETEなどを振り分ける)
 	cartItemDetailHandler := http.HandlerFunc(api.cartItemDetailHandler)
 
+	// "/api/checkout/payment-intent" へのリクエスト担当
+	paymentIntentHandler := http.HandlerFunc(api.createPaymentIntentHandler)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
 
-	// `/api/beans` と `/api/beans/{id}` の両方をミドルウェアで保護する
+	// 各APIをミドルウェアで保護する
+	// コーヒー豆関連API
 	mux.Handle("/api/beans", jwtAuthMiddleware(beansHandler))
 	mux.Handle("/api/beans/{id}", jwtAuthMiddleware(beanDetailHandler))
 	mux.Handle("/api/my/beans", jwtAuthMiddleware(myBeansHandler))
+
+	// カート関連API
 	mux.Handle("/api/cart/items", jwtAuthMiddleware(addCartItemHandler))
 	mux.Handle("/api/cart/items/{id}", jwtAuthMiddleware(cartItemDetailHandler))
 	mux.Handle("/api/cart", jwtAuthMiddleware(getCartHandler))
+
+	// 決済関連API
+	mux.Handle("/api/checkout/payment-intent", jwtAuthMiddleware(paymentIntentHandler))
 
 	// CORS設定
 	handler := cors.New(cors.Options{
 		AllowedOrigins: []string{"http://localhost:5173"},
 		AllowedMethods: []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
-		AllowedHeaders: []string{"Content-Type"},
+		AllowedHeaders: []string{"Content-Type", "Authorization"},
 	}).Handler(mux)
 
 	fmt.Println("Backend server is running on http://localhost:8080")
