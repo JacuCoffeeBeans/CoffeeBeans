@@ -5,7 +5,9 @@ import BeanDetailPage from './pages/BeanDetailPage';
 import NewBeanPage from './pages/NewBeanPage';
 import MyBeansPage from './pages/MyBeansPage';
 import EditBeanPage from './pages/EditBeanPage';
-import CartPage from './pages/CartPage'; // 追加
+import CartPage from './pages/CartPage';
+import CheckoutPage from './pages/CheckoutPage';
+import CheckoutSuccessPage from './pages/CheckoutSuccessPage';
 import Login from './pages/Login';
 import { useAuth } from './contexts/AuthContext';
 import { Center, Loader } from '@mantine/core';
@@ -42,11 +44,27 @@ const App = () => {
             </RequireAuth>
           }
         />
-        <Route // 追加
+        <Route
           path="cart"
           element={
             <RequireAuth>
               <CartPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="checkout"
+          element={
+            <RequireAuth>
+              <CheckoutPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="checkout/success"
+          element={
+            <RequireAuth>
+              <CheckoutSuccessPage />
             </RequireAuth>
           }
         />

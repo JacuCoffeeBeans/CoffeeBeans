@@ -204,7 +204,7 @@ export default function CartPage() {
             <Title order={3}>合計: {totalPrice.toLocaleString()}円</Title>
           </Group>
           <Group justify="flex-end" mt="md">
-            <Button size="lg">購入手続きへ進む</Button>
+            <Button component={Link} to="/checkout" size="lg">購入手続きへ進む</Button>
           </Group>
         </>
       )}
