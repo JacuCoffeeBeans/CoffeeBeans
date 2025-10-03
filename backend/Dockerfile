@@ -1,5 +1,5 @@
 # ベースイメージとしてGoを指定
-FROM golang:1.24-bookworm
+FROM golang:1.25-bookworm
 
 # 作業ディレクトリを作成
 WORKDIR /app
