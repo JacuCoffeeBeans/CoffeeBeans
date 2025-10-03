@@ -5,34 +5,68 @@ import CheckoutForm from '../components/CheckoutForm';
 import { useAuth } from '../contexts/AuthContext';
 import { Center, Container, Loader, Alert } from '@mantine/core';
 
+// Stripeの公開可能キーを環境変数から読み込む
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+
+// カートアイテムの型定義
+interface CartItem {
+  id: string;
+  bean_id: number;
+  name: string;
+  price: number;
+  quantity: number;
+}
 
 export default function CheckoutPage() {
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [totalPrice, setTotalPrice] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { session } = useAuth();
 
   useEffect(() => {
     if (!session) return;
 
-    const createPaymentIntent = async () => {
+    const initializeCheckout = async () => {
       try {
-        const response = await fetch('/api/checkout/payment-intent', {
+        // 1. カート情報を取得
+        const cartResponse = await fetch('/api/cart', {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        if (!cartResponse.ok) {
+          throw new Error('カート情報の取得に失敗しました。');
+        }
+        const cartData = await cartResponse.json();
+        const items = Array.isArray(cartData) ? cartData : (cartData?.items || []);
+
+        if (items.length === 0) {
+          setError('カートが空のため、決済に進めません。');
+          setLoading(false);
+          return;
+        }
+        setCartItems(items);
+        setTotalPrice(items.reduce((acc, item) => acc + item.price * item.quantity, 0));
+
+        // 2. 決済情報(PaymentIntent)を作成
+        const paymentIntentResponse = await fetch('/api/checkout/payment-intent', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             Authorization: `Bearer ${session.access_token}`,
           },
-          body: JSON.stringify({}),
+          body: JSON.stringify({}), // バックエンドがセッションからカート内容を判断するためボディは空
         });
 
-        if (!response.ok) {
-          const errorData = await response.json();
+        if (!paymentIntentResponse.ok) {
+          const errorData = await paymentIntentResponse.json();
           throw new Error(errorData.message || '決済の準備に失敗しました。');
         }
 
-        const data = await response.json();
-        const secret = data.client_secret || data.clientSecret;
+        const paymentIntentData = await paymentIntentResponse.json();
+        const secret = paymentIntentData.client_secret || paymentIntentData.clientSecret;
 
         if (!secret) {
           throw new Error('client_secretがレスポンスに含まれていません。');
@@ -41,13 +75,23 @@ export default function CheckoutPage() {
 
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : '不明なエラーが発生しました。';
-        console.error('Failed to create PaymentIntent:', message);
+        console.error('Failed to initialize checkout:', message);
         setError(message);
+      } finally {
+        setLoading(false);
       }
     };
 
-    createPaymentIntent();
+    initializeCheckout();
   }, [session]);
+
+  if (loading) {
+    return (
+      <Center style={{ height: '80vh' }}>
+        <Loader />
+      </Center>
+    );
+  }
 
   if (error) {
     return (
@@ -59,14 +103,14 @@ export default function CheckoutPage() {
     );
   }
 
-  // clientSecretが取得できるまでローダーを表示し、取得後にElementsをレンダリングする
   return (
     <Container my="xl">
-      {clientSecret ? (
+      {clientSecret && cartItems.length > 0 ? (
         <Elements options={{ clientSecret }} stripe={stripePromise}>
-          <CheckoutForm />
+          <CheckoutForm cartItems={cartItems} totalPrice={totalPrice} />
         </Elements>
       ) : (
+        // ローディング完了後も何も表示されない場合のフォールバック
         <Center style={{ height: '80vh' }}>
           <Loader />
         </Center>

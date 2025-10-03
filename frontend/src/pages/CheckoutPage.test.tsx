@@ -9,7 +9,7 @@ import type { Session } from '@supabase/supabase-js';
 // Stripeのモック
 vi.mock('@stripe/react-stripe-js', () => ({
   Elements: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  PaymentElement: () => <div>Payment Element</div>, // 追加
+  PaymentElement: () => <div>Payment Element</div>,
   useStripe: () => ({}),
   useElements: () => ({}),
 }));
@@ -22,7 +22,24 @@ const mockSession = {
   user: { id: 'test-user-id' },
 } as unknown as Session;
 
-const renderWithProviders = (session: Session | null) => {
+const mockCartItems = [
+  { id: '1', bean_id: 1, name: 'Test Bean', price: 1000, quantity: 2 },
+];
+
+// 成功時のデフォルトfetchモック
+const successfulFetchMock = vi.fn().mockImplementation((url) => {
+  if (url === '/api/cart') {
+    return Promise.resolve({ ok: true, json: () => Promise.resolve(mockCartItems) });
+  }
+  if (url === '/api/checkout/payment-intent') {
+    return Promise.resolve({ ok: true, json: () => Promise.resolve({ client_secret: 'test_secret' }) });
+  }
+  return Promise.reject(new Error(`Unhandled fetch url: ${url}`));
+});
+
+const renderWithProviders = (session: Session | null, cartItems: any[] = mockCartItems, fetchMock: any = successfulFetchMock) => {
+  globalThis.fetch = fetchMock;
+
   return render(
     <MantineProvider>
       <MemoryRouter initialEntries={['/checkout']}>
@@ -37,36 +54,43 @@ const renderWithProviders = (session: Session | null) => {
 };
 
 describe('CheckoutPage', () => {
-  beforeEach(() => {
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve({ client_secret: 'test_secret' }),
-    });
-  });
-
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  test('clientSecretを取得し、CheckoutFormを表示する', async () => {
+  test('カート情報と決済情報を取得し、CheckoutFormを表示する', async () => {
     renderWithProviders(mockSession);
 
-    // APIが呼ばれるのを待つ
     await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/cart', expect.any(Object));
       expect(globalThis.fetch).toHaveBeenCalledWith('/api/checkout/payment-intent', expect.any(Object));
     });
 
-    // CheckoutForm内の要素が表示されているかで判断
-    expect(await screen.findByText('支払う')).toBeInTheDocument();
+    expect(await screen.findByText('ご注文内容')).toBeInTheDocument();
+    expect(await screen.findByText('配送先情報')).toBeInTheDocument();
   });
 
-  test('clientSecretが取得できない場合、ローダーが表示され続ける', () => {
-    // fetchが解決しないPromiseを返すようにモック
-    globalThis.fetch = vi.fn(() => new Promise(() => {}));
-    renderWithProviders(mockSession);
+  test('カートが空の場合、エラーメッセージを表示する', async () => {
+    const emptyCartFetchMock = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) });
+    renderWithProviders(mockSession, [], emptyCartFetchMock);
 
-    // MantineのLoaderは明示的なroleを持たないため、DOM構造から存在を確認
-    const loader = document.querySelector('.mantine-Loader-root');
-    expect(loader).toBeInTheDocument();
+    expect(await screen.findByText('カートが空のため、決済に進めません。')).toBeInTheDocument();
+  });
+
+  test('clientSecretが取得できない場合、エラーメッセージを表示する', async () => {
+    const failingFetchMock = vi.fn().mockImplementation((url) => {
+      if (url === '/api/cart') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve(mockCartItems) });
+      }
+      if (url === '/api/checkout/payment-intent') {
+        return Promise.resolve({ ok: false, json: () => Promise.resolve({ message: 'Intent Error' }) });
+      }
+      return Promise.reject(new Error(`Unhandled fetch url: ${url}`));
+    });
+
+    renderWithProviders(mockSession, mockCartItems, failingFetchMock);
+    
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('Intent Error');
   });
 });
