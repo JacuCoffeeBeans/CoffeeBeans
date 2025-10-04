@@ -1,12 +1,11 @@
 import { useEffect, useState } from 'react';
-import { loadStripe } from '@stripe/stripe-js';
+import { stripePromise } from '../lib/stripe';
 import { Elements } from '@stripe/react-stripe-js';
 import CheckoutForm from '../components/CheckoutForm';
 import { useAuth } from '../contexts/AuthContext';
 import { Center, Container, Loader, Alert } from '@mantine/core';
 
-// Stripeの公開可能キーを環境変数から読み込む
-const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY);
+
 
 // カートアイテムの型定義
 interface CartItem {
