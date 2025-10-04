@@ -4,6 +4,7 @@ import {
   useElements,
   PaymentElement,
 } from '@stripe/react-stripe-js';
+import { useDisclosure } from '@mantine/hooks';
 import {
   Button,
   Alert,
@@ -15,8 +16,11 @@ import {
   Text,
   SimpleGrid,
   Divider,
+  Modal,
+  Group,
 } from '@mantine/core';
 import { IconCircleCheck } from '@tabler/icons-react';
+import { useNavigate } from 'react-router-dom';
 
 // 型定義
 interface CartItem {
@@ -36,6 +40,8 @@ export default function CheckoutForm({
 }: CheckoutFormProps) {
   const stripe = useStripe();
   const elements = useElements();
+  const navigate = useNavigate();
+  const [opened, { open, close }] = useDisclosure(false);
 
   // フォーム全体の入力状態
   const [name, setName] = useState('');
@@ -106,16 +112,24 @@ export default function CheckoutForm({
     }
   }, [postalCode]);
 
-  const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    open();
+  };
+
+  const handleConfirmPayment = async () => {
+    close();
 
     if (!stripe || !elements) {
+      // Stripe.js has not yet loaded.
+      // Make sure to disable form submission until Stripe.js has loaded.
       return;
     }
 
     setIsLoading(true);
+    setErrorMessage(null);
 
-    const { error } = await stripe.confirmPayment({
+    const { error, paymentIntent } = await stripe.confirmPayment({
       elements,
       confirmParams: {
         return_url: `${window.location.origin}/checkout/success`,
@@ -131,19 +145,46 @@ export default function CheckoutForm({
           },
         },
       },
+      redirect: 'if_required',
     });
 
-    if (error.type === 'card_error' || error.type === 'validation_error') {
-      setErrorMessage(error.message || '決済情報の入力に誤りがあります。');
+    if (error) {
+      if (error.type === 'card_error' || error.type === 'validation_error') {
+        setErrorMessage(error.message || '決済情報の入力に誤りがあります。');
+      } else {
+        console.error('Stripe error:', error);
+        setErrorMessage('予期せぬエラーが発生しました。別のカードをお試しください。');
+      }
+    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
+      navigate(
+        `/checkout/success?payment_intent_client_secret=${paymentIntent.client_secret}`
+      );
+    } else if (paymentIntent) {
+      // 3Dセキュアなど、追加のアクションが必要な場合
+      // Stripeが自動的にリダイレクトするため、ここでは通常何もしない
+      console.log('PaymentIntent status:', paymentIntent.status);
     } else {
-      setErrorMessage('予期せぬエラーが発生しました。');
+      setErrorMessage('決済処理が完了できませんでした。再度お試しください。');
     }
 
     setIsLoading(false);
   };
 
   return (
-    <form onSubmit={handleSubmit}>
+    <>
+      <Modal opened={opened} onClose={close} title="お支払いの確認" centered>
+        <Text>お支払い内容を確定します。よろしいですか？</Text>
+        <Group justify="flex-end" mt="md">
+          <Button variant="default" onClick={close}>
+            キャンセル
+          </Button>
+          <Button onClick={handleConfirmPayment} loading={isLoading}>
+            支払う
+          </Button>
+        </Group>
+      </Modal>
+
+      <form onSubmit={handleSubmit}>
       <Title order={2} mb="lg">
         ご注文内容
       </Title>
@@ -252,5 +293,6 @@ export default function CheckoutForm({
         </Alert>
       )}
     </form>
+    </>
   );
 }

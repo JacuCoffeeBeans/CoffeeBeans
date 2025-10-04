@@ -13,6 +13,9 @@ import { useAuth } from './contexts/AuthContext';
 import { Center, Loader } from '@mantine/core';
 import Layout from './components/Layout';
 
+import { Elements } from '@stripe/react-stripe-js';
+import { stripePromise } from './lib/stripe';
+
 const App = () => {
   return (
     <Routes>
@@ -64,7 +67,9 @@ const App = () => {
           path="checkout/success"
           element={
             <RequireAuth>
-              <CheckoutSuccessPage />
+              <Elements stripe={stripePromise}>
+                <CheckoutSuccessPage />
+              </Elements>
             </RequireAuth>
           }
         />
