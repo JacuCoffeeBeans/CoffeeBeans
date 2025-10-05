@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/stripe/stripe-go/v72"
 	"github.com/stripe/stripe-go/v72/paymentintent"
+	"github.com/stripe/stripe-go/v72/webhook"
 )
 
 // getBeansHandler はStoreを使ってDBから全件取得する
@@ -468,4 +470,69 @@ func (a *Api) createPaymentIntentHandler(w http.ResponseWriter, r *http.Request)
 		log.Printf("ERROR: Failed to encode response to JSON: %v", err)
 		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 	}
+}
+
+// handleStripeWebhook はStripeからのWebhookを受け取り処理します
+func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
+	const MaxBodyBytes = int64(65536)
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	payload, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Printf("ERROR: Failed to read webhook body: %v", err)
+		http.Error(w, "Failed to read request body", http.StatusServiceUnavailable)
+		return
+	}
+
+	// Stripeからの署名をヘッダーから取得
+	signatureHeader := r.Header.Get("Stripe-Signature")
+	if signatureHeader == "" {
+		http.Error(w, "Missing Stripe-Signature header", http.StatusBadRequest)
+		return
+	}
+
+	// 環境変数からWebhookシークレットを取得
+	webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+	if webhookSecret == "" {
+		log.Printf("ERROR: STRIPE_WEBHOOK_SECRET is not set")
+		http.Error(w, "Webhook secret is not configured", http.StatusInternalServerError)
+		return
+	}
+
+	// 署名を検証してイベントを構築
+	event, err := webhook.ConstructEvent(payload, signatureHeader, webhookSecret)
+	if err != nil {
+		log.Printf("ERROR: Webhook signature verification failed: %v", err)
+		http.Error(w, "Webhook signature verification failed", http.StatusBadRequest)
+		return
+	}
+
+	// イベントの種類に応じて処理を振り分ける
+	switch event.Type {
+	case "payment_intent.succeeded":
+		var paymentIntent stripe.PaymentIntent
+		err := json.Unmarshal(event.Data.Raw, &paymentIntent)
+		if err != nil {
+			log.Printf("ERROR: Failed to unmarshal payment_intent.succeeded: %v", err)
+			http.Error(w, "Failed to parse webhook data", http.StatusBadRequest)
+			return
+		}
+		// TODO: #81 で実装する注文作成ロジックを呼び出す
+		log.Printf("✅ PaymentIntent succeeded: %s", paymentIntent.ID)
+
+	case "payment_intent.payment_failed":
+		var paymentIntent stripe.PaymentIntent
+		err := json.Unmarshal(event.Data.Raw, &paymentIntent)
+		if err != nil {
+			log.Printf("ERROR: Failed to unmarshal payment_intent.payment_failed: %v", err)
+			http.Error(w, "Failed to parse webhook data", http.StatusBadRequest)
+			return
+		}
+		// TODO: 失敗時の処理を実装（例: ユーザーへの通知）
+		log.Printf("❌ PaymentIntent failed: %s", paymentIntent.ID)
+
+	default:
+		log.Printf("🤷‍♀️ Unhandled event type: %s", event.Type)
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
