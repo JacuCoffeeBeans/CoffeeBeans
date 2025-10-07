@@ -14,9 +14,10 @@ import (
 	"github.com/rs/cors"
 )
 
-// Api はStore（DB接続）を保持する、私たちのアプリケーションの本体です
+// Api はStore（DB接続）とDB接続プールを保持する、私たちのアプリケーションの本体です
 type Api struct {
-	store *Store
+	store  *Store
+	dbpool *pgxpool.Pool
 }
 
 func main() {
@@ -50,7 +51,7 @@ func main() {
 	log.Println("Successfully initialized Supabase client!") // 接続準備ができたことをログに出力
 
 	store := NewStore(dbpool)
-	api := &Api{store: store}
+	api := &Api{store: store, dbpool: dbpool}
 
 	// ルーティング設定
 	// 1. 各URLで何をするかのハンドラを定義する
@@ -80,7 +81,7 @@ func main() {
 	paymentIntentHandler := http.HandlerFunc(api.createPaymentIntentHandler)
 
 	// "POST /api/webhooks/stripe" へのリクエスト担当
-	stripeWebhookHandler := http.HandlerFunc(handleStripeWebhook)
+	stripeWebhookHandler := http.HandlerFunc(api.handleStripeWebhook)
 
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()

@@ -455,6 +455,7 @@ func (a *Api) createPaymentIntentHandler(w http.ResponseWriter, r *http.Request)
 			Enabled: stripe.Bool(true),
 		},
 	}
+	params.AddMetadata("user_id", userID)
 
 	pi, err := paymentintent.New(params)
 	if err != nil {
@@ -473,7 +474,7 @@ func (a *Api) createPaymentIntentHandler(w http.ResponseWriter, r *http.Request)
 }
 
 // handleStripeWebhook はStripeからのWebhookを受け取り処理します
-func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
+func (a *Api) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	const MaxBodyBytes = int64(65536)
 	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
 	payload, err := io.ReadAll(r.Body)
@@ -483,22 +484,9 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stripeからの署名をヘッダーから取得
 	signatureHeader := r.Header.Get("Stripe-Signature")
-	if signatureHeader == "" {
-		http.Error(w, "Missing Stripe-Signature header", http.StatusBadRequest)
-		return
-	}
-
-	// 環境変数からWebhookシークレットを取得
 	webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
-	if webhookSecret == "" {
-		log.Printf("ERROR: STRIPE_WEBHOOK_SECRET is not set")
-		http.Error(w, "Webhook secret is not configured", http.StatusInternalServerError)
-		return
-	}
 
-	// 署名を検証してイベントを構築
 	event, err := webhook.ConstructEvent(payload, signatureHeader, webhookSecret)
 	if err != nil {
 		log.Printf("ERROR: Webhook signature verification failed: %v", err)
@@ -506,29 +494,124 @@ func handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// イベントの種類に応じて処理を振り分ける
 	switch event.Type {
 	case "payment_intent.succeeded":
 		var paymentIntent stripe.PaymentIntent
-		err := json.Unmarshal(event.Data.Raw, &paymentIntent)
-		if err != nil {
+		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
 			log.Printf("ERROR: Failed to unmarshal payment_intent.succeeded: %v", err)
 			http.Error(w, "Failed to parse webhook data", http.StatusBadRequest)
 			return
 		}
-		// TODO: #81 で実装する注文作成ロジックを呼び出す
 		log.Printf("✅ PaymentIntent succeeded: %s", paymentIntent.ID)
+
+		userID, ok := paymentIntent.Metadata["user_id"]
+		shortUserID := userID
+		if len(userID) > 8 {
+			shortUserID = userID[:8]
+		}
+		if !ok || userID == "" {
+			log.Printf("ERROR: user_id not found in payment intent metadata for pi_id: %s", paymentIntent.ID)
+			http.Error(w, "User ID not found in metadata", http.StatusBadRequest)
+			return
+		}
+
+		cartItems, err := a.store.GetCartItemsByUserID(r.Context(), userID)
+		if err != nil {
+			log.Printf("ERROR: Failed to get cart items for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to get cart items", http.StatusInternalServerError)
+			return
+		}
+		if len(cartItems) == 0 {
+			log.Printf("INFO: Cart is empty for user %s on payment success, possibly already processed.", shortUserID)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// トランザクションを開始
+		tx, err := a.dbpool.Begin(r.Context())
+		if err != nil {
+			log.Printf("ERROR: Failed to begin transaction: %v", err)
+			http.Error(w, "Failed to process order", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback(r.Context()) // エラー発生時にロールバック
+
+		storeWithTx := NewStore(tx)
+		order := &Order{
+			UserID:                userID,
+			Status:                "succeeded",
+			TotalAmount:           int(paymentIntent.Amount),
+			Currency:              string(paymentIntent.Currency),
+			PaymentMethodType:     paymentIntent.PaymentMethodTypes[0],
+			StripePaymentIntentID: paymentIntent.ID,
+		}
+
+		// 注文を作成
+		if _, err := storeWithTx.CreateOrder(r.Context(), order, cartItems); err != nil {
+			log.Printf("ERROR: Failed to create order for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to create order", http.StatusInternalServerError)
+			return
+		}
+
+		// カートを空にする
+		if err := storeWithTx.ClearCart(r.Context(), userID); err != nil {
+			log.Printf("ERROR: Failed to clear cart for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to clear cart", http.StatusInternalServerError)
+			return
+		}
+
+		// トランザクションをコミット
+		if err := tx.Commit(r.Context()); err != nil {
+			log.Printf("ERROR: Failed to commit transaction for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to finalize order", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("🎉 Order created successfully for user %s", shortUserID)
 
 	case "payment_intent.payment_failed":
 		var paymentIntent stripe.PaymentIntent
-		err := json.Unmarshal(event.Data.Raw, &paymentIntent)
-		if err != nil {
+		if err := json.Unmarshal(event.Data.Raw, &paymentIntent); err != nil {
 			log.Printf("ERROR: Failed to unmarshal payment_intent.payment_failed: %v", err)
 			http.Error(w, "Failed to parse webhook data", http.StatusBadRequest)
 			return
 		}
-		// TODO: 失敗時の処理を実装（例: ユーザーへの通知）
-		log.Printf("❌ PaymentIntent failed: %s", paymentIntent.ID)
+		log.Printf("❌ PaymentIntent failed: %s, Reason: %s", paymentIntent.ID, paymentIntent.LastPaymentError.Msg)
+
+		userID, ok := paymentIntent.Metadata["user_id"]
+		shortUserID := userID
+		if len(userID) > 8 {
+			shortUserID = userID[:8]
+		}
+		if !ok || userID == "" {
+			log.Printf("ERROR: user_id not found in payment intent metadata for pi_id: %s", paymentIntent.ID)
+			http.Error(w, "User ID not found in metadata", http.StatusBadRequest)
+			return
+		}
+
+		cartItems, err := a.store.GetCartItemsByUserID(r.Context(), userID)
+		if err != nil {
+			log.Printf("ERROR: Failed to get cart items for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to get cart items", http.StatusInternalServerError)
+			return
+		}
+
+		order := &Order{
+			UserID:                userID,
+			Status:                "failed",
+			TotalAmount:           int(paymentIntent.Amount),
+			Currency:              string(paymentIntent.Currency),
+			PaymentMethodType:     paymentIntent.PaymentMethodTypes[0],
+			StripePaymentIntentID: paymentIntent.ID,
+		}
+
+		// 失敗した注文も記録する
+		if _, err := a.store.CreateOrder(r.Context(), order, cartItems); err != nil {
+			log.Printf("ERROR: Failed to create failed order record for user %s: %v", shortUserID, err)
+			http.Error(w, "Failed to create order record", http.StatusInternalServerError)
+			return
+		}
+		log.Printf("📝 Failed order recorded for user %s", shortUserID)
 
 	default:
 		log.Printf("🤷‍♀️ Unhandled event type: %s", event.Type)
