@@ -79,6 +79,9 @@ func main() {
 	// "/api/checkout/payment-intent" へのリクエスト担当
 	paymentIntentHandler := http.HandlerFunc(api.createPaymentIntentHandler)
 
+	// "POST /api/webhooks/stripe" へのリクエスト担当
+	stripeWebhookHandler := http.HandlerFunc(handleStripeWebhook)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
@@ -96,6 +99,9 @@ func main() {
 
 	// 決済関連API
 	mux.Handle("/api/checkout/payment-intent", jwtAuthMiddleware(paymentIntentHandler))
+
+	// Stripe Webhook（認証不要）
+	mux.Handle("POST /api/webhooks/stripe", stripeWebhookHandler)
 
 	// CORS設定
 	handler := cors.New(cors.Options{

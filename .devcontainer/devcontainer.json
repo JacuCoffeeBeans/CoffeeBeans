@@ -8,7 +8,8 @@
   "features": {
     "ghcr.io/devcontainers/features/go:1": {
       "version": "1.22"
-    }
+    },
+    "ghcr.io/nullcoder/devcontainer-features/stripe-cli:1": {}
   },
   "customizations": {
     "vscode": {
