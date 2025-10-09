@@ -3,7 +3,7 @@
   "dockerComposeFile": "../docker-compose.yml",
   "service": "frontend",
   "workspaceFolder": "/workspaces/coffeebeans",
-  "postCreateCommand": "cd frontend && npm install",
+  "postCreateCommand": "cd frontend && npm install && npm install supabase --save-dev",
   "shutdownAction": "stopCompose",
   "features": {
     "ghcr.io/devcontainers/features/go:1": {

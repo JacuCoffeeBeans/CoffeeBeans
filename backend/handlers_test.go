@@ -217,12 +217,16 @@ func createTestRequest(t *testing.T, payload string, secret string) *http.Reques
 func TestHandleStripeWebhook(t *testing.T) {
 	t.Setenv("STRIPE_WEBHOOK_SECRET", testWebhookSecret)
 
+	// テスト用のApiインスタンスを作成
+	store := NewStore(testDbpool)
+	api := &Api{store: store, dbpool: testDbpool}
+
 	t.Run("Success with valid signature", func(t *testing.T) {
-		payload := `{"id": "evt_test", "type": "payment_intent.succeeded", "data": {"object": {}}}`
+		payload := `{"id": "evt_test", "type": "payment_intent.succeeded", "data": {"object": {"id": "pi_test", "metadata": {"user_id": "00000000-0000-0000-0000-000000000000"}}}}`
 		req := createTestRequest(t, payload, testWebhookSecret)
 
 		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(handleStripeWebhook)
+		handler := http.HandlerFunc(api.handleStripeWebhook)
 		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
@@ -233,7 +237,7 @@ func TestHandleStripeWebhook(t *testing.T) {
 		req := httptest.NewRequest("POST", "/api/webhooks/stripe", strings.NewReader(payload))
 
 		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(handleStripeWebhook)
+		handler := http.HandlerFunc(api.handleStripeWebhook)
 		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
@@ -244,9 +248,63 @@ func TestHandleStripeWebhook(t *testing.T) {
 		req := createTestRequest(t, payload, "wrong_secret")
 
 		rr := httptest.NewRecorder()
-		handler := http.HandlerFunc(handleStripeWebhook)
+		handler := http.HandlerFunc(api.handleStripeWebhook)
 		handler.ServeHTTP(rr, req)
 
 		assert.Equal(t, http.StatusBadRequest, rr.Code)
 	})
+}
+
+func TestHandleStripeWebhook_CreateOrder(t *testing.T) {
+	t.Setenv("STRIPE_WEBHOOK_SECRET", testWebhookSecret)
+
+	ctx := context.Background()
+	// このテストはDBの状態を変更し、それを検証するため、トランザクションではなく実際のDBプールに対して実行します。
+	// ただし、テストの独立性を保つために、テストの最後にクリーンアップ処理を入れるべきです。
+	// ここでは簡略化のため、テストDBが毎回クリーンな状態から始まることを前提とします。
+	store := NewStore(testDbpool)
+	api := &Api{store: store, dbpool: testDbpool}
+
+	// --- Arrange ---
+	// 1. テスト用のユーザーと豆を作成
+	testUserID := "00000000-0000-0000-0000-000000000000"
+	bean, err := store.CreateBean(ctx, &Bean{Name: "Test Bean for Order", Origin: "Test", Price: 1500, Process: "washed", RoastProfile: "medium", UserID: testUserID})
+	assert.NoError(t, err)
+	// テスト終了時に作成したデータを削除
+	defer store.DeleteBean(ctx, bean.ID, testUserID)
+
+
+	// 2. カートに商品を追加
+	_, err = store.AddOrUpdateCartItem(ctx, testUserID, AddCartItemRequest{BeanID: bean.ID, Quantity: 2})
+	assert.NoError(t, err)
+	// このカートアイテムはWebhook内でClearCart���れるので、個別の削除は不要
+
+	// --- Act ---
+	// 3. Webhookリクエストを送信
+	paymentIntentID := "pi_test_" + strconv.FormatInt(time.Now().Unix(), 10)
+	payload := fmt.Sprintf(`{"id": "evt_test", "type": "payment_intent.succeeded", "data": {"object": {"id": "%s", "amount": 3000, "currency": "jpy", "metadata": {"user_id": "%s"}, "payment_method_types": ["card"]}}}`, paymentIntentID, testUserID)
+	req := createTestRequest(t, payload, testWebhookSecret)
+
+	rr := httptest.NewRecorder()
+	api.handleStripeWebhook(rr, req)
+
+	// --- Assert ---
+	// 4. 結果を検証
+	assert.Equal(t, http.StatusOK, rr.Code)
+
+	// 4a. カートが空になっていることを確認
+	cartItems, err := store.GetCartItemsByUserID(ctx, testUserID)
+	assert.NoError(t, err)
+	assert.Empty(t, cartItems, "カートが空にされていません")
+
+	// 4b. 注文が作成されていることを確認
+	order, err := store.GetOrderByPaymentIntentID(ctx, paymentIntentID)
+	assert.NoError(t, err)
+	assert.NotNil(t, order)
+	assert.Equal(t, testUserID, order.UserID)
+	assert.Equal(t, "succeeded", order.Status)
+	assert.Equal(t, 3000, order.TotalAmount)
+	// テスト終了時に作成した注文を削除
+	defer testDbpool.Exec(ctx, "DELETE FROM order_items WHERE order_id = $1", order.ID)
+	defer testDbpool.Exec(ctx, "DELETE FROM orders WHERE id = $1", order.ID)
 }

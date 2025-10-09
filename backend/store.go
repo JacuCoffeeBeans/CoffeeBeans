@@ -15,6 +15,7 @@ type Querier interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults
 }
 
 // Bean 構造体
@@ -30,7 +31,7 @@ type Bean struct {
 	UserID       string    `json:"user_id"`
 }
 
-// Store はデータベース接続またはトランザクションを保持します
+// Store はデー���ベース接続またはトランザクションを保持します
 type Store struct {
 	db Querier
 }
@@ -330,7 +331,7 @@ func (s *Store) UpdateCartItemQuantity(ctx context.Context, cartItemID string, u
 	)
 
 	if err != nil {
-		// pgx.ErrNoRowsは、行が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
+		// pgx.ErrNoRowsは、���が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
 		}
@@ -361,4 +362,93 @@ func (s *Store) DeleteCartItem(ctx context.Context, cartItemID string, userID st
 	}
 
 	return nil
+}
+
+// Order 構造体
+type Order struct {
+	ID                    int       `json:"id"`
+	UserID                string    `json:"user_id"`
+	Status                string    `json:"status"`
+	TotalAmount           int       `json:"total_amount"`
+	Currency              string    `json:"currency"`
+	PaymentMethodType     string    `json:"payment_method_type"`
+	StripePaymentIntentID string    `json:"stripe_payment_intent_id"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
+}
+
+// OrderItem 構造体
+type OrderItem struct {
+	ID              int `json:"id"`
+	OrderID         int `json:"order_id"`
+	BeanID          int `json:"bean_id"`
+	PriceAtPurchase int `json:"price_at_purchase"`
+	Quantity        int `json:"quantity"`
+}
+
+// CreateOrder は新しい注文をDBに作成します
+func (s *Store) CreateOrder(ctx context.Context, order *Order, items []CartItemDetail) (*Order, error) {
+	// 1. ordersテーブルに注文を挿入
+	orderQuery := `
+		INSERT INTO orders (user_id, status, total_amount, currency, payment_method_type, stripe_payment_intent_id)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id, created_at, updated_at
+	`
+	err := s.db.QueryRow(ctx, orderQuery, order.UserID, order.Status, order.TotalAmount, order.Currency, order.PaymentMethodType, order.StripePaymentIntentID).Scan(&order.ID, &order.CreatedAt, &order.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2. order_itemsテーブルに注文商品を挿入
+	batch := &pgx.Batch{}
+	itemQuery := `
+		INSERT INTO order_items (order_id, bean_id, price_at_purchase, quantity)
+		VALUES ($1, $2, $3, $4)
+	`
+	for _, item := range items {
+		batch.Queue(itemQuery, order.ID, item.BeanID, item.Price, item.Quantity)
+	}
+
+	br := s.db.SendBatch(ctx, batch)
+	defer br.Close()
+
+	for i := 0; i < len(items); i++ {
+		_, err := br.Exec()
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return order, nil
+}
+
+// ClearCart はユーザーのカートを空にします
+func (s *Store) ClearCart(ctx context.Context, userID string) error {
+	// ユーザーIDに紐づくカートIDを取得
+	var cartID string
+	err := s.db.QueryRow(ctx, "SELECT id FROM carts WHERE user_id = $1", userID).Scan(&cartID)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			// カートが存在しない場合は、何もせず正常終了
+			return nil
+		}
+		return err
+	}
+
+	// カートIDに紐づくすべてのカートアイテムを削除
+	_, err = s.db.Exec(ctx, "DELETE FROM cart_items WHERE cart_id = $1", cartID)
+	return err
+}
+
+// GetOrderByPaymentIntentID はStripeのPaymentIntent IDで注文を取得します
+func (s *Store) GetOrderByPaymentIntentID(ctx context.Context, paymentIntentID string) (*Order, error) {
+	var order Order
+	query := `SELECT id, user_id, status, total_amount, currency, payment_method_type, stripe_payment_intent_id, created_at, updated_at FROM orders WHERE stripe_payment_intent_id = $1`
+	err := s.db.QueryRow(ctx, query, paymentIntentID).Scan(
+		&order.ID, &order.UserID, &order.Status, &order.TotalAmount, &order.Currency, &order.PaymentMethodType, &order.StripePaymentIntentID, &order.CreatedAt, &order.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &order, nil
 }
