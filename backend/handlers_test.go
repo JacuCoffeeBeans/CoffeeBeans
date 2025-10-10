@@ -1,7 +1,7 @@
 package main
 
 import (
-	"context"
+		"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -273,11 +273,10 @@ func TestHandleStripeWebhook_CreateOrder(t *testing.T) {
 	// テスト終了時に作成したデータを削除
 	defer store.DeleteBean(ctx, bean.ID, testUserID)
 
-
 	// 2. カートに商品を追加
 	_, err = store.AddOrUpdateCartItem(ctx, testUserID, AddCartItemRequest{BeanID: bean.ID, Quantity: 2})
 	assert.NoError(t, err)
-	// このカートアイテムはWebhook内でClearCart���れるので、個別の削除は不要
+	// このカートアイテムはWebhook内でClearCartされるので、個別の削除は不要
 
 	// --- Act ---
 	// 3. Webhookリクエストを送信
@@ -307,4 +306,102 @@ func TestHandleStripeWebhook_CreateOrder(t *testing.T) {
 	// テスト終了時に作成した注文を削除
 	defer testDbpool.Exec(ctx, "DELETE FROM order_items WHERE order_id = $1", order.ID)
 	defer testDbpool.Exec(ctx, "DELETE FROM orders WHERE id = $1", order.ID)
+}
+
+func TestProfileAPI(t *testing.T) {
+	// このテストは複数のサブテストでDBの状態を変更・検証するため、
+	// サブテストごとにトランザクションを管理します。
+	dummyUserID := "00000000-0000-0000-0000-000000000000"
+
+	t.Run("POST /api/profile - 正常系", func(t *testing.T) {
+		ctx := context.Background()
+		tx, err := testDbpool.Begin(ctx)
+		assert.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		store := NewStore(tx)
+		api := &Api{store: store, dbpool: testDbpool}
+		handler := http.HandlerFunc(api.profileHandler)
+
+		profileData := `{"display_name": "Test User", "icon_url": "http://example.com/icon.png", "post_code": "123-4567", "address": "Test Address", "about_me": "This is a test user."}`
+		req := httptest.NewRequest("POST", "/api/profile", strings.NewReader(profileData))
+		req.Header.Set("Content-Type", "application/json")
+
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, dummyUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusCreated, rr.Code)
+
+		var createdProfile Profile
+		err = json.NewDecoder(rr.Body).Decode(&createdProfile)
+		assert.NoError(t, err)
+		assert.Equal(t, dummyUserID, createdProfile.UserID)
+		assert.Equal(t, "Test User", createdProfile.DisplayName)
+	})
+
+	t.Run("PUT /api/profile - 正常系", func(t *testing.T) {
+		ctx := context.Background()
+		tx, err := testDbpool.Begin(ctx)
+		assert.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		store := NewStore(tx)
+		api := &Api{store: store, dbpool: testDbpool}
+		handler := http.HandlerFunc(api.profileHandler)
+
+		// 先にプロフィールを作成しておく
+		initialProfile := &Profile{UserID: dummyUserID, DisplayName: "Initial User", IconURL: "initial.png", PostCode: "111-1111", Address: "Initial Address", AboutMe: "Initial."}
+		_, err = store.CreateProfile(ctx, initialProfile)
+		assert.NoError(t, err)
+
+		// 更新処理
+		updateData := `{"display_name": "Updated User", "icon_url": "updated.png", "post_code": "222-2222", "address": "Updated Address", "about_me": "Updated."}`
+		putReq := httptest.NewRequest("PUT", "/api/profile", strings.NewReader(updateData))
+		putReq.Header.Set("Content-Type", "application/json")
+		ctxWithUser := context.WithValue(putReq.Context(), userIDKey, dummyUserID)
+		putReq = putReq.WithContext(ctxWithUser)
+
+		putRR := httptest.NewRecorder()
+		handler.ServeHTTP(putRR, putReq)
+
+		assert.Equal(t, http.StatusOK, putRR.Code)
+
+		var updatedProfile Profile
+		err = json.NewDecoder(putRR.Body).Decode(&updatedProfile)
+		assert.NoError(t, err)
+		assert.Equal(t, "Updated User", updatedProfile.DisplayName)
+	})
+
+	t.Run("POST /api/profile - 異常系(重複)", func(t *testing.T) {
+		ctx := context.Background()
+		tx, err := testDbpool.Begin(ctx)
+		assert.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		store := NewStore(tx)
+		api := &Api{store: store, dbpool: testDbpool}
+		handler := http.HandlerFunc(api.profileHandler)
+
+		// 先にプロフィールを作成しておく
+		initialProfile := &Profile{UserID: dummyUserID, DisplayName: "Initial User", IconURL: "initial.png", PostCode: "111-1111", Address: "Initial Address", AboutMe: "Initial."}
+		_, err = store.CreateProfile(ctx, initialProfile)
+		assert.NoError(t, err)
+
+		// 同じユーザーで再度作成しようとするとエラーになるはず
+		duplicateProfileData := `{"display_name": "Duplicate User", "icon_url": "duplicate.png", "post_code": "333-3333", "address": "Duplicate Address", "about_me": "Duplicate."}`
+		req := httptest.NewRequest("POST", "/api/profile", strings.NewReader(duplicateProfileData))
+		req.Header.Set("Content-Type", "application/json")
+
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, dummyUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// PostgreSQLのunique_violationエラー(23505)をハンドラで500として返す想定
+		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
 }

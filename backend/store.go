@@ -31,7 +31,7 @@ type Bean struct {
 	UserID       string    `json:"user_id"`
 }
 
-// Store はデー���ベース接続またはトランザクションを保持します
+// Store はデータベース接続またはトランザクションを保持します
 type Store struct {
 	db Querier
 }
@@ -331,7 +331,7 @@ func (s *Store) UpdateCartItemQuantity(ctx context.Context, cartItemID string, u
 	)
 
 	if err != nil {
-		// pgx.ErrNoRowsは、���が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
+		// pgx.ErrNoRowsは、行が見つからなかった（つまり、IDが違うか、ユーザーが所有者でない）場合に返される
 		if err == pgx.ErrNoRows {
 			return nil, pgx.ErrNoRows
 		}
@@ -451,4 +451,70 @@ func (s *Store) GetOrderByPaymentIntentID(ctx context.Context, paymentIntentID s
 		return nil, err
 	}
 	return &order, nil
+}
+
+// Profile 構造体
+type Profile struct {
+	UserID           string    `json:"user_id"`
+	DisplayName      string    `json:"display_name"`
+	IconURL          string    `json:"icon_url"`
+	PostCode         string    `json:"post_code"`
+	Address          string    `json:"address"`
+	AboutMe          string    `json:"about_me"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	StripeCustomerID *string    `json:"stripe_customer_id"`
+}
+
+// CreateProfile は新しいプロフィールをDBに挿入します
+func (s *Store) CreateProfile(ctx context.Context, profile *Profile) (*Profile, error) {
+	var newProfile Profile
+	query := `INSERT INTO profiles (user_id, display_name, icon_url, post_code, address, about_me)
+			   VALUES ($1, $2, $3, $4, $5, $6)
+			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id`
+
+	err := s.db.QueryRow(ctx, query, profile.UserID, profile.DisplayName, profile.IconURL, profile.PostCode, profile.Address, profile.AboutMe).Scan(
+		&newProfile.UserID,
+		&newProfile.DisplayName,
+		&newProfile.IconURL,
+		&newProfile.PostCode,
+		&newProfile.Address,
+		&newProfile.AboutMe,
+		&newProfile.CreatedAt,
+		&newProfile.UpdatedAt,
+		&newProfile.StripeCustomerID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &newProfile, nil
+}
+
+// UpdateProfile は既存のプロフィールを更新します
+func (s *Store) UpdateProfile(ctx context.Context, profile *Profile) (*Profile, error) {
+	var updatedProfile Profile
+	query := `UPDATE profiles
+			   SET display_name = $1, icon_url = $2, post_code = $3, address = $4, about_me = $5, updated_at = NOW()
+			   WHERE user_id = $6
+			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id`
+
+	err := s.db.QueryRow(ctx, query, profile.DisplayName, profile.IconURL, profile.PostCode, profile.Address, profile.AboutMe, profile.UserID).Scan(
+		&updatedProfile.UserID,
+		&updatedProfile.DisplayName,
+		&updatedProfile.IconURL,
+		&updatedProfile.PostCode,
+		&updatedProfile.Address,
+		&updatedProfile.AboutMe,
+		&updatedProfile.CreatedAt,
+		&updatedProfile.UpdatedAt,
+		&updatedProfile.StripeCustomerID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &updatedProfile, nil
 }
