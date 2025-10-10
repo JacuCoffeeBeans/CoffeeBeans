@@ -83,6 +83,9 @@ func main() {
 	// "POST /api/webhooks/stripe" へのリクエスト担当
 	stripeWebhookHandler := http.HandlerFunc(api.handleStripeWebhook)
 
+	// "/api/profile" へのリクエスト担当
+	profileHandler := http.HandlerFunc(api.profileHandler)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
@@ -97,6 +100,9 @@ func main() {
 	mux.Handle("/api/cart/items", jwtAuthMiddleware(addCartItemHandler))
 	mux.Handle("/api/cart/items/{id}", jwtAuthMiddleware(cartItemDetailHandler))
 	mux.Handle("/api/cart", jwtAuthMiddleware(getCartHandler))
+
+	// プロフィール関連API
+	mux.Handle("/api/profile", jwtAuthMiddleware(profileHandler))
 
 	// 決済関連API
 	mux.Handle("/api/checkout/payment-intent", jwtAuthMiddleware(paymentIntentHandler))
