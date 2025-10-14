@@ -409,6 +409,69 @@ func (a *Api) deleteCartItemHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// profileHandlerは "/api/profile" へのリクエストをHTTPメソッドによって振り分ける
+func (a *Api) profileHandler(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		a.createProfileHandler(w, r)
+	case http.MethodPut:
+		a.updateProfileHandler(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// createProfileHandler は新しいプロフィールを登録します
+func (a *Api) createProfileHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(string)
+
+	var profile Profile
+	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	profile.UserID = userID
+
+	newProfile, err := a.store.CreateProfile(r.Context(), &profile)
+	if err != nil {
+		log.Printf("ERROR: Failed to create profile in DB: %v", err)
+		http.Error(w, "Failed to create profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(newProfile); err != nil {
+		log.Printf("ERROR: Failed to encode new profile to JSON: %v", err)
+	}
+}
+
+// updateProfileHandler は既存のプロフィールを更新します
+func (a *Api) updateProfileHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(string)
+
+	var profile Profile
+	if err := json.NewDecoder(r.Body).Decode(&profile); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	profile.UserID = userID
+
+	updatedProfile, err := a.store.UpdateProfile(r.Context(), &profile)
+	if err != nil {
+		log.Printf("ERROR: Failed to update profile in DB: %v", err)
+		http.Error(w, "Failed to update profile", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(updatedProfile); err != nil {
+		log.Printf("ERROR: Failed to encode updated profile to JSON: %v", err)
+	}
+}
+
 // createPaymentIntentHandler はStripeのPaymentIntentを作成し、client_secretを返します
 func (a *Api) createPaymentIntentHandler(w http.ResponseWriter, r *http.Request) {
 	// 認証済みユーザーでなければエラー
