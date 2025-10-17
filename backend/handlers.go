@@ -11,6 +11,8 @@ import (
 	"strings"
 
 	"github.com/stripe/stripe-go/v72"
+	"github.com/stripe/stripe-go/v72/account"
+	"github.com/stripe/stripe-go/v72/accountlink"
 	"github.com/stripe/stripe-go/v72/paymentintent"
 	"github.com/stripe/stripe-go/v72/webhook"
 )
@@ -681,4 +683,114 @@ func (a *Api) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// createStripeAccountLinkHandler はStripe Connectアカウントを作成し、オンボーディング用のURLを返します
+func (a *Api) createStripeAccountLinkHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(string)
+
+	// Stripe APIキーを設定
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
+
+	// ユーザーのプロフィールを取得
+	profile, err := a.store.GetProfileByUserID(r.Context(), userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get profile for user %s: %v", userID, err)
+		http.Error(w, "Failed to get user profile", http.StatusInternalServerError)
+		return
+	}
+
+	// 既にStripeアカウントIDを持っているか確認
+	var accountID string
+	if profile.StripeAccountID != nil && *profile.StripeAccountID != "" {
+		accountID = *profile.StripeAccountID
+	} else {
+		// Stripe Connectアカウントを作成
+		params := &stripe.AccountParams{
+			Type:         stripe.String(string(stripe.AccountTypeExpress)),
+			Country:      stripe.String("JP"),
+			Email:        stripe.String(profile.DisplayName + "@example.com"), // 仮のメールアドレス
+			Capabilities: &stripe.AccountCapabilitiesParams{
+				CardPayments: &stripe.AccountCapabilitiesCardPaymentsParams{Requested: stripe.Bool(true)},
+				Transfers:    &stripe.AccountCapabilitiesTransfersParams{Requested: stripe.Bool(true)},
+			},
+		}
+		newAccount, err := account.New(params)
+		if err != nil {
+			log.Printf("ERROR: Failed to create Stripe account for user %s: %v", userID, err)
+			http.Error(w, "Failed to create Stripe account", http.StatusInternalServerError)
+			return
+		}
+		accountID = newAccount.ID
+
+		// プロフィールを更新
+		if err := a.store.UpdateStripeAccount(r.Context(), userID, accountID, strconv.FormatBool(newAccount.ChargesEnabled)); err != nil {
+			log.Printf("ERROR: Failed to update profile with Stripe account ID for user %s: %v", userID, err)
+			http.Error(w, "Failed to update profile", http.StatusInternalServerError)
+			return
+		}
+	}
+
+	// アカウントリンクを作成
+	linkParams := &stripe.AccountLinkParams{
+		Account:    stripe.String(accountID),
+		RefreshURL: stripe.String("http://localhost:8080/api/stripe/connect/refresh"), // 再度このハンドラを呼び出すURL
+		ReturnURL:  stripe.String("http://localhost:5173/my/beans"), // オンボーディング完了後のリダイレクト先
+		Type:       stripe.String("account_onboarding"),
+	}
+	accountLink, err := accountlink.New(linkParams)
+	if err != nil {
+		log.Printf("ERROR: Failed to create account link for user %s: %v", userID, err)
+		http.Error(w, "Failed to create account link", http.StatusInternalServerError)
+		return
+	}
+
+	// レスポンスを返す
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"url": accountLink.URL}); err != nil {
+		log.Printf("ERROR: Failed to encode response to JSON: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// handleStripeConnectRedirectHandler はStripeからのリダイレクトを処理します
+func (a *Api) handleStripeConnectRedirectHandler(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(string)
+
+	// ユーザーのプロフィールを取得
+	profile, err := a.store.GetProfileByUserID(r.Context(), userID)
+	if err != nil {
+		log.Printf("ERROR: Failed to get profile for user %s: %v", userID, err)
+		http.Error(w, "User profile not found", http.StatusNotFound)
+		return
+	}
+
+	if profile.StripeAccountID == nil || *profile.StripeAccountID == "" {
+		log.Printf("ERROR: Stripe account ID not found for user %s", userID)
+		http.Error(w, "Stripe account not set up", http.StatusBadRequest)
+		return
+	}
+
+	// Stripeアカウント情報を取得
+	stripe.Key = os.Getenv("STRIPE_SECRET_KEY")
+	stripeAccount, err := account.GetByID(*profile.StripeAccountID, nil)
+	if err != nil {
+		log.Printf("ERROR: Failed to retrieve Stripe account for user %s: %v", userID, err)
+		http.Error(w, "Failed to retrieve Stripe account", http.StatusInternalServerError)
+		return
+	}
+
+	// アカウントステータスを更新
+	status := "restricted"
+	if stripeAccount.ChargesEnabled {
+		status = "enabled"
+	}
+	if err := a.store.UpdateStripeAccount(r.Context(), userID, *profile.StripeAccountID, status); err != nil {
+		log.Printf("ERROR: Failed to update Stripe account status for user %s: %v", userID, err)
+		http.Error(w, "Failed to update account status", http.StatusInternalServerError)
+		return
+	}
+
+	// フロントエンドの特定ページにリダイレクト
+	http.Redirect(w, r, "http://localhost:5173/my/beans?stripe_connect=success", http.StatusFound)
 }

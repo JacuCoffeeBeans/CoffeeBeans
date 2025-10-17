@@ -464,6 +464,8 @@ type Profile struct {
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 	StripeCustomerID *string    `json:"stripe_customer_id"`
+	StripeAccountID *string `json:"stripe_account_id"`
+	StripeAccountStatus *string `json:"stripe_account_status"`
 }
 
 // CreateProfile は新しいプロフィールをDBに挿入します
@@ -471,7 +473,7 @@ func (s *Store) CreateProfile(ctx context.Context, profile *Profile) (*Profile, 
 	var newProfile Profile
 	query := `INSERT INTO profiles (user_id, display_name, icon_url, post_code, address, about_me)
 			   VALUES ($1, $2, $3, $4, $5, $6)
-			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id`
+			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id, stripe_account_id, stripe_account_status`
 
 	err := s.db.QueryRow(ctx, query, profile.UserID, profile.DisplayName, profile.IconURL, profile.PostCode, profile.Address, profile.AboutMe).Scan(
 		&newProfile.UserID,
@@ -483,6 +485,8 @@ func (s *Store) CreateProfile(ctx context.Context, profile *Profile) (*Profile, 
 		&newProfile.CreatedAt,
 		&newProfile.UpdatedAt,
 		&newProfile.StripeCustomerID,
+		&newProfile.StripeAccountID,
+		&newProfile.StripeAccountStatus,
 	)
 
 	if err != nil {
@@ -498,7 +502,7 @@ func (s *Store) UpdateProfile(ctx context.Context, profile *Profile) (*Profile, 
 	query := `UPDATE profiles
 			   SET display_name = $1, icon_url = $2, post_code = $3, address = $4, about_me = $5, updated_at = NOW()
 			   WHERE user_id = $6
-			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id`
+			   RETURNING user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id, stripe_account_id, stripe_account_status`
 
 	err := s.db.QueryRow(ctx, query, profile.DisplayName, profile.IconURL, profile.PostCode, profile.Address, profile.AboutMe, profile.UserID).Scan(
 		&updatedProfile.UserID,
@@ -510,6 +514,8 @@ func (s *Store) UpdateProfile(ctx context.Context, profile *Profile) (*Profile, 
 		&updatedProfile.CreatedAt,
 		&updatedProfile.UpdatedAt,
 		&updatedProfile.StripeCustomerID,
+		&updatedProfile.StripeAccountID,
+		&updatedProfile.StripeAccountStatus,
 	)
 
 	if err != nil {
@@ -517,4 +523,34 @@ func (s *Store) UpdateProfile(ctx context.Context, profile *Profile) (*Profile, 
 	}
 
 	return &updatedProfile, nil
+}
+
+// GetProfileByUserID はユーザーIDでプロフィールを取得します
+func (s *Store) GetProfileByUserID(ctx context.Context, userID string) (*Profile, error) {
+	var profile Profile
+	query := `SELECT user_id, display_name, icon_url, post_code, address, about_me, created_at, updated_at, stripe_customer_id, stripe_account_id, stripe_account_status FROM profiles WHERE user_id = $1`
+	err := s.db.QueryRow(ctx, query, userID).Scan(
+		&profile.UserID,
+		&profile.DisplayName,
+		&profile.IconURL,
+		&profile.PostCode,
+		&profile.Address,
+		&profile.AboutMe,
+		&profile.CreatedAt,
+		&profile.UpdatedAt,
+		&profile.StripeCustomerID,
+		&profile.StripeAccountID,
+		&profile.StripeAccountStatus,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return &profile, nil
+}
+
+// UpdateStripeAccount はStripeアカウントIDとステータスを更新します
+func (s *Store) UpdateStripeAccount(ctx context.Context, userID, accountID, status string) error {
+	query := `UPDATE profiles SET stripe_account_id = $1, stripe_account_status = $2, updated_at = NOW() WHERE user_id = $3`
+	_, err := s.db.Exec(ctx, query, accountID, status, userID)
+	return err
 }

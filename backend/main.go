@@ -86,6 +86,10 @@ func main() {
 	// "/api/profile" へのリクエスト担当
 	profileHandler := http.HandlerFunc(api.profileHandler)
 
+	// Stripe Connect関連
+	createStripeAccountLinkHandler := http.HandlerFunc(api.createStripeAccountLinkHandler)
+	handleStripeConnectRedirectHandler := http.HandlerFunc(api.handleStripeConnectRedirectHandler)
+
 	// 2. URLとハンドラを結びつける
 	mux := http.NewServeMux()
 	mux.Handle("/", healthCheckHandler)
@@ -106,6 +110,11 @@ func main() {
 
 	// 決済関連API
 	mux.Handle("/api/checkout/payment-intent", jwtAuthMiddleware(paymentIntentHandler))
+
+	// Stripe Connect関連API
+	mux.Handle("POST /api/stripe/connect/account-link", jwtAuthMiddleware(createStripeAccountLinkHandler))
+	mux.Handle("GET /api/stripe/connect/redirect", jwtAuthMiddleware(handleStripeConnectRedirectHandler))
+	mux.Handle("GET /api/stripe/connect/refresh", jwtAuthMiddleware(createStripeAccountLinkHandler))
 
 	// Stripe Webhook（認証不要）
 	mux.Handle("POST /api/webhooks/stripe", stripeWebhookHandler)
