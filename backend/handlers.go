@@ -707,9 +707,9 @@ func (a *Api) createStripeAccountLinkHandler(w http.ResponseWriter, r *http.Requ
 	} else {
 		// Stripe Connectアカウントを作成
 		params := &stripe.AccountParams{
-			Type:         stripe.String(string(stripe.AccountTypeExpress)),
-			Country:      stripe.String("JP"),
-			Email:        stripe.String(profile.DisplayName + "@example.com"), // 仮のメールアドレス
+			Type:    stripe.String(string(stripe.AccountTypeExpress)),
+			Country: stripe.String("JP"),
+			Email:   stripe.String(profile.DisplayName + "@example.com"), // 仮のメールアドレス
 			Capabilities: &stripe.AccountCapabilitiesParams{
 				CardPayments: &stripe.AccountCapabilitiesCardPaymentsParams{Requested: stripe.Bool(true)},
 				Transfers:    &stripe.AccountCapabilitiesTransfersParams{Requested: stripe.Bool(true)},
@@ -734,8 +734,8 @@ func (a *Api) createStripeAccountLinkHandler(w http.ResponseWriter, r *http.Requ
 	// アカウントリンクを作成
 	linkParams := &stripe.AccountLinkParams{
 		Account:    stripe.String(accountID),
-		RefreshURL: stripe.String("http://localhost:8080/api/stripe/connect/refresh"), // 再度このハンドラを呼び出すURL
-		ReturnURL:  stripe.String("http://localhost:5173/my/beans"), // オンボーディング完了後のリダイレクト先
+		RefreshURL: stripe.String("http://localhost:8080/api/stripe/connect/refresh"),      // 再度このハンドラを呼び出すURL
+		ReturnURL:  stripe.String("http://localhost:5173/my/beans?stripe_connect=success"), // オンボーディング完了後のリダイレクト先
 		Type:       stripe.String("account_onboarding"),
 	}
 	accountLink, err := accountlink.New(linkParams)
