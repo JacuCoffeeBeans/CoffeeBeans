@@ -1,7 +1,7 @@
 package main
 
 import (
-		"context"
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
@@ -13,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"net"
+	"crypto/tls"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -403,5 +405,114 @@ func TestProfileAPI(t *testing.T) {
 
 		// PostgreSQLのunique_violationエラー(23505)をハンドラで500として返す想定
 		assert.Equal(t, http.StatusInternalServerError, rr.Code)
+	})
+}
+
+// TestStripeConnectHandlers はStripe Connect関連のハンドラをテストします
+func TestStripeConnectHandlers(t *testing.T) {
+	// Stripe APIのモックサーバーをセットアップ
+	mockStripeAPIServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/accounts": // アカウント作成
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id": "acct_mock12345", "charges_enabled": false, "details_submitted": false}`))
+		case "/v1/account_links": // アカウントリンク作成
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"object": "account_link", "url": "https://connect.stripe.com/mock_onboarding"}`))
+		case "/v1/accounts/acct_mock12345": // アカウント取得
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"id": "acct_mock12345", "charges_enabled": true, "details_submitted": true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer mockStripeAPIServer.Close()
+
+	// Stripe SDKの通信をモックサーバーに向ける
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			if addr == "api.stripe.com:443" {
+				return net.Dial(network, mockStripeAPIServer.Listener.Addr().String())
+			}
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
+	}
+	defer func() {
+		http.DefaultTransport = originalTransport
+	}()
+
+	dummyUserID := "00000000-0000-0000-0000-000000000000"
+
+	t.Run("POST /api/stripe/connect/account-link - 正常系", func(t *testing.T) {
+		ctx := context.Background()
+		tx, err := testDbpool.Begin(ctx)
+		assert.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		store := NewStore(tx)
+		api := &Api{store: store, dbpool: testDbpool}
+		handler := http.HandlerFunc(api.createStripeAccountLinkHandler)
+
+		// 先にプロフィールを作成しておく
+		_, err = store.CreateProfile(ctx, &Profile{UserID: dummyUserID, DisplayName: "test"})
+		assert.NoError(t, err)
+
+		req := httptest.NewRequest("POST", "/api/stripe/connect/account-link", nil)
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, dummyUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+
+		var result map[string]string
+		err = json.NewDecoder(rr.Body).Decode(&result)
+		assert.NoError(t, err)
+		assert.Equal(t, "https://connect.stripe.com/mock_onboarding", result["url"])
+
+		// DBにStripe Account IDが保存されたか確認
+		profile, err := store.GetProfileByUserID(ctx, dummyUserID)
+		assert.NoError(t, err)
+		assert.NotNil(t, profile.StripeAccountID)
+		assert.Equal(t, "acct_mock12345", *profile.StripeAccountID)
+	})
+
+	t.Run("GET /api/stripe/connect/redirect - 正常系", func(t *testing.T) {
+		ctx := context.Background()
+		tx, err := testDbpool.Begin(ctx)
+		assert.NoError(t, err)
+		defer tx.Rollback(ctx)
+
+		store := NewStore(tx)
+		api := &Api{store: store, dbpool: testDbpool}
+		handler := http.HandlerFunc(api.handleStripeConnectRedirectHandler)
+
+		// 先にプロフィールとStripeアカウントIDを作成しておく
+		_, err = store.CreateProfile(ctx, &Profile{UserID: dummyUserID, DisplayName: "test"})
+		assert.NoError(t, err)
+		err = store.UpdateStripeAccount(ctx, dummyUserID, "acct_mock12345", "restricted")
+		assert.NoError(t, err)
+
+		req := httptest.NewRequest("GET", "/api/stripe/connect/redirect", nil)
+		ctxWithUser := context.WithValue(req.Context(), userIDKey, dummyUserID)
+		req = req.WithContext(ctxWithUser)
+
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+
+		// リダイレクトされることを確認
+		assert.Equal(t, http.StatusFound, rr.Code)
+		assert.Equal(t, "http://localhost:5173/my/beans?stripe_connect=success", rr.Header().Get("Location"))
+
+		// DBのステータスが更新されたか確認
+		profile, err := store.GetProfileByUserID(ctx, dummyUserID)
+		assert.NoError(t, err)
+		assert.NotNil(t, profile.StripeAccountStatus)
+		assert.Equal(t, "enabled", *profile.StripeAccountStatus)
 	})
 }
